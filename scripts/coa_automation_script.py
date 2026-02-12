@@ -42,6 +42,25 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send", # sending automatic emails
 ]
 
+debug = False
+
+# maximum number of days passed since submission for automatic email to be sent.
+max_delay = 7
+    
+# The ID and range of a submission spreadsheet.
+coa_db_id = ""
+db_folder_id = ""
+form_sheet_id = ""
+data_range = "Form responses 1!A2:I"
+# cell updating is done with f"Form responses 1!I{idx+2}"
+summary_sheet_id = ""
+summary_folder_id = ""
+summary_week = "Sheet1!B1"
+summary_range = "Sheet1!A3:G"
+
+# email of the sender, use "Display Name <email address>" format
+sender_email = ""
+
 def extract_drive_id(url):
     drive_id = url
     
@@ -426,29 +445,10 @@ def summary_email(sender, to, date, values, images):
     
     return {"raw": encoded_message}
 
-debug = False
-
-# maximum number of days passed since submission for automatic email to be sent.
-max_delay = 7
-    
-# The ID and range of a submission spreadsheet.
-coa_db_id = "1WUb_ZS_hhQAxNYrgg5ezhvpKNur350h_"
-db_folder_id = "1NX8IytEoF2lHTqxEb4WYUU_w6PRLgf6r"
-form_sheet = "1S9xGNofAsEmzuFlBKZUvNI6nmVUQZiAHnqZkjqADRlQ"
-data_range = "Form responses 1!A2:I"
-# cell updating is done with f"Form responses 1!I{idx+2}"
-summary_sheet_id = "1ZGi_ePmfJW-pEhAIiY-qoVwBBbN-9trxvkp7OkP2-ls"
-summary_week = "Sheet1!B1"
-summary_range = "Sheet1!A3:G"
-summary_folder_id = "1k-952PvNLrhmRENUxgaxFOB_upCCTQAD"
-
-# email of the sender, use "Display Name <email address>" format
-sender_email = "Aidan Gebbie <aidan.rw.gebbie@gmail.com>"
-
 creds = get_creds()
 
 with tempfile.TemporaryDirectory() as tmpdirname:
-    values = get_spreadsheet_data(creds, form_sheet, data_range)
+    values = get_spreadsheet_data(creds, form_sheet_id, data_range)
     currated_values = []
     
     new = False
@@ -480,7 +480,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 continue # already processed
             
             try:
-                update_cell(creds, form_sheet, f"Form responses 1!I{idx+2}", "n")
+                update_cell(creds, form_sheet_id, f"Form responses 1!I{idx+2}", "n")
                 
                 print("Processing response: " + row[1] + " (" + row[0] + ")")
                 data_file = get_file(creds, extract_drive_id(row[5]), tmpdirname)
@@ -512,7 +512,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 
                 print("response message created.")
                 
-                update_cell(creds, form_sheet, f"Form responses 1!I{idx+2}", "y")
+                update_cell(creds, form_sheet_id, f"Form responses 1!I{idx+2}", "y")
                 
                 if debug:
                     print("In debug, response email sending disabled")
@@ -581,4 +581,5 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         #TODO consider turning this into a batch request https://github.com/googleapis/google-api-python-client/blob/main/docs/batch.md
         for row in values:
             delete_file(creds, row[6]) # delete image on drive
+
         
