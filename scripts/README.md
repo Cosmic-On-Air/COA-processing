@@ -13,3 +13,4 @@ The functionality of all the automation described above is divided into 3 well d
 # Note:
 
 When using the cosmic_on_air functions, make sure to have the CARI_7A_DVD folder in the current working directory.
+When using the cosmic_on_air_db script's main function (when running the script directly instead of importing it), it first attemps to find cwd\data archive\coa.db, if it fails it will ask for the absolute path of the .db file.
