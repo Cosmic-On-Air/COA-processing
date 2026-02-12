@@ -10,4 +10,6 @@ Both the raw data, flight data, and processed data are stored in an organised da
 
 The functionality of all the automation described above is divided into 3 well documented python scripts: cosmic_on_air provides all functions used in handling data, cosmic_on_air_db provides a class to handle and streamline interactions with the data archive, coa_automation_script automates interactions with the google drive to retrieve and reply to submissions. 
 
+# Note:
 
+When using the cosmic_on_air functions, make sure to have the CARI_7A_DVD folder in the current working directory.
