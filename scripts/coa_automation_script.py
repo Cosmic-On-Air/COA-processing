@@ -5,7 +5,29 @@ Created on Fri Jan  9 09:32:09 2026
 @author: aidan
 """
 
+"""
+Name: coa_automation_script.py
+Description:
+    *   This code automates processing of google form data submissions using the google cloud API
+    *   The first half of the code provides various functions for interacting with the google API
+    *   Specifically it uses the google drive, google sheets, and Gmail APIs.
+    *   The second half of the code is a script to process responses, email citizens their results,
+        and send weekly summaries to the CoA team.
+    *   The Script relies on both the cosmic_on_air_db and cosmic_on_air classes and functions to 
+        perform its tasks. 
+    *   It also requires OAuth keys for the google API, and naturally a reliable internet connection.
+
+Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
+
+Version: 1 Mar 2026
+
+Contributors:
+A. Gebbie, Department of Physics, University of Cape Town, South Africa
+"""
+
 #TODO use logging library, its especially useful since google API already integrates it
+##########################################################################################
+# import required modules
 import cosmic_on_air as ca
 import cosmic_on_air_db as ca_db
 
@@ -16,7 +38,6 @@ import time
 import tempfile
 import os
 import io
-from zipfile import ZipFile, ZIP_DEFLATED # to compress the html attachment
 import socket
 socket.setdefaulttimeout(None) #ensure that there is no default network request timeout
 
@@ -35,74 +56,141 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
+################################################################################################
+# define program constants
+
+# debug flag. When debug==True, no emails are sent to citizens
+debug = False
+
 # If modifying these scopes, delete the file token.json.
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets", # read and write forms spreadsheet
-    "https://www.googleapis.com/auth/drive", # TODO try make stricter access of drive
+    "https://www.googleapis.com/auth/spreadsheets", # read/write forms spreadsheet
+    "https://www.googleapis.com/auth/drive", # read/write google drive files/folders
     "https://www.googleapis.com/auth/gmail.send", # sending automatic emails
 ]
-
-debug = False
 
 # maximum number of days passed since submission for automatic email to be sent.
 max_delay = 7
     
 # The ID and range of a submission spreadsheet.
-coa_db_id = ""
-db_folder_id = ""
-form_sheet_id = ""
-data_range = "Form responses 1!A2:I"
+coa_db_id = "1BZdB4rI0tTv-XQso3f_l-g8tKOecjjFe"
+db_folder_id = "1SzYj5EtJFghee3Tt2Ct7MX6N0Roc31bs"
+form_sheet_id = "1CxkzhD3_av7tC_aTwajOspJ4aKAq3HuClFsxBYx6MiQ"
+submission_range = "Form responses 1!A2:K"
 # cell updating is done with f"Form responses 1!I{idx+2}"
-summary_sheet_id = ""
-summary_folder_id = ""
+summary_sheet_id = "1IMXxyc_c7Bys8t5n10XhM1ewyuzAL2FIAwgeX5zjvA0"
+summary_folder_id = "1XpAHcxDHfVQzoAyi2q_XzC8NUqrjAXs4"
 summary_week = "Sheet1!B1"
 summary_range = "Sheet1!A3:G"
 
 # email of the sender, use "Display Name <email address>" format
-sender_email = ""
+sender_email = "Cosmic On Air <cosmiconairuct@gmail.com>"
+
+# email list of COA team to send weekly summaries to
+summary_recipients = "Cosmic On Air UCT <cosmiconairuct@gmail.com>"
+#summary_recipients += ", Cosmic On Air Team <cosmiconair@gmail.com>"
+summary_recipients += ", Aidan Gebbie <gbbaid001@myuct.ac.za>"
+#TODO : add more recipients
+
+# path to OAuth credentials
+credentials_path = os.path.join(os.getcwd(), "credentials\\google_credentials.json")
+token_path = os.path.join(os.getcwd(), "credentials\\token.json")
 
 def extract_drive_id(url):
+    """
+    Function to extract the file id from a google drive share link
+
+    Parameters
+    ----------
+    url : string of the link to the google drive file/folder
+
+    Returns
+    -------
+    drive_id : string of the drive id of the file/folder
+
+    """
+    
     drive_id = url
     
-    if "id=" in url:
+    if "id=" in url: # one url style
         idx = url.rfind("=") + 1
         drive_id = url[idx:]
-    if "file/d" in url:
+    elif "file/d" in url: # other url style
         start_idx = url.rfind("file/d/") + 7
         stop_idx = url.rfind("/view")
         drive_id = url[start_idx:stop_idx]
     
     return drive_id
 
+def email_with_name(email, display_name):
+    """
+    Function to combine email and display_name into a string.
+    
+    Parameters
+    ----------
+    email : string of the email.
+    
+    display_name : string of the display name.
+    
+    Returns
+    -------
+    combined_email : string in format "display_name <email>"
+    """
+    
+    return f"{display_name} <{email}>"
+
 def get_creds():
+    """
+    Function to fetch the google OAuth credentials from the folder using the global
+    constant for the path to the credentials.
+    
+    Parameters
+    ----------
+    None
+    
+    Returns
+    -------
+    creds : object of the google OAuth credentials.
+    """
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    # created automatically when the authorization flow completes for the first time.
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+    
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("google_credentials.json", SCOPES)
-            creds = flow.run_local_server(port=0) # only localhost:8080 is permitted
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+            creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
-        with open("token.json", "w") as token:
+        with open(token_path, "w") as token:
             token.write(creds.to_json())
     
     return creds
 
-# Source - https://stackoverflow.com/a
-# Posted by 7h3rAm, modified by community. See post 'Timeline' for change history
-# Retrieved 2026-01-12, License - CC BY-SA 4.0
-
 def is_internet(host="8.8.8.8", port=53, timeout=3):
     """
+    Function to check that there is an active network connection.
+    It tests this by pinging the google public dns
+    
+    Source - https://stackoverflow.com/a
+    Posted by 7h3rAm, modified by community. See post 'Timeline' for change history
+    Retrieved 2026-01-12, License - CC BY-SA 4.0
+    
     Host: 8.8.8.8 (google-public-dns-a.google.com)
     OpenPort: 53/tcp
     Service: domain (DNS/TCP)
+    
+    Parameters
+    ----------
+    None
+    
+    Returns
+    -------
+    state : boolean value, True if a successful ping was made, otherwise False.
     """
     try:
         socket.setdefaulttimeout(timeout)
@@ -113,6 +201,24 @@ def is_internet(host="8.8.8.8", port=53, timeout=3):
         return False
 
 def safe_execute(request, num_retries=3, quota_sleep=60):
+    """
+    Function to safely execute a google API operation by attempting it a number of times
+    and handling quota limit exceptions.
+    
+    Parameters
+    ----------
+    request : object of the specific API request being made
+    
+    num_retries : (default=3) positive integer number of retries to attempt, this is passed
+        to the request.execute() function.
+        
+    quota_sleep : (default=60) number of seconds to sleep in a quota limit is reached.
+    
+    Returns
+    -------
+    result : result object returned by request.execute()
+    """
+    
     try:
         result = request.execute(num_retries=num_retries)
     except HttpError as e:
@@ -128,6 +234,24 @@ def safe_execute(request, num_retries=3, quota_sleep=60):
 def get_file(creds, file_id, path="", num_retries=3, quota_sleep=60):
     """
     Download a file from the google drive to the desired path.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    file_id : google drive id of the file to download
+    
+    path : path to download the file to 
+        (default="", file download to current working directory)
+    
+    num_retries : number of retry attempts to download file
+        (default=3) (see downloader.next_chunk() function for details)
+        
+    quota_sleep : (default=60) number of seconds to sleep in a quota limit is reached.
+    
+    Returns
+    -------
+    filename : string of final absolute path to the file (including the file name).
     """
     
     # create drive api client
@@ -136,11 +260,13 @@ def get_file(creds, file_id, path="", num_retries=3, quota_sleep=60):
     # get filename
     filename = service.files().get(fileId=file_id, fields="name").execute()["name"]
     filename = os.path.join(path, filename)
-
-    # pylint: disable=maybe-no-member
+    
+    # create file download request and downloader object
     request = service.files().get_media(fileId=file_id)
     file = io.FileIO(filename, "wb") # open local write-binary file
     downloader = MediaIoBaseDownload(file, request)
+    
+    # download file in chunks (with timeout error handling)
     done = False
     while not done:
         try:
@@ -156,9 +282,141 @@ def get_file(creds, file_id, path="", num_retries=3, quota_sleep=60):
         
     return filename
 
+def create_folder(creds, folder_name, parent_id):
+    """
+    Create a folder on the google drive.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    folder_name : string for the name of the folder to create.
+    
+    parent_id : string google drive folder id of the parent folder to create the
+        folder in.
+    
+    Returns
+    -------
+    folder_id : string of the google drive id of the new folder that was created.
+    """
+    
+    # create the folder metadata
+    folder_metadata = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder", # google drive folder
+        "parents": [parent_id]
+    }
+    
+    # create and execute drive API call
+    service = build("drive", "v3", credentials=creds)
+    folder = safe_execute(service.files().create(body=folder_metadata, fields="id"))
+        
+    return folder["id"]
+
+def upload_file(creds, local_path, parent_id):
+    """
+    Upload a file to the google drive.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    local_path : path of the local file to upload to the google drive.
+    
+    parent_id : google drive id of the parent folder to upload the file to.
+    
+    Returns
+    -------
+    folder_id : string of the google drive id of the new file that was created.
+    """
+    # get filename of file
+    filename = os.path.basename(local_path)
+    
+    # Wrap the local file for upload
+    media = MediaFileUpload(local_path, resumable=True)
+    
+    
+    file_metadata = {
+        "name": filename,
+        "parents": [parent_id]
+    }
+    
+    # create and execute google drive API call
+    service = build("drive", "v3", credentials=creds)
+    uploaded_file = safe_execute(service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields="id"
+    ))
+        
+    return uploaded_file["id"]
+
+def update_file(creds, local_path, file_id):
+    """
+    Update an existing file on the google drive.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    local_path : path of the local file to use to update the drive file.
+    
+    file_id : google drive id of the file to update.
+    
+    Returns
+    -------
+    result : result obtained from request.execute() API call.
+    """
+    
+    # Wrap the local file for upload
+    media = MediaFileUpload(local_path, resumable=True)
+    
+    # create and execute drive API call
+    service = build("drive", "v3", credentials=creds)
+    result = safe_execute(service.files().update(
+        fileId=file_id,
+        media_body=media,
+    ))
+    
+    return result
+        
+def delete_file(creds, file_id):    
+    """
+    Delete a file on the google drive.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    file_id : google drive id of the file to delete.
+    
+    Returns
+    -------
+    result : result obtained from request.execute() API call.
+    """
+    
+    # create and execute drive API call
+    service = build("drive", "v3", credentials = creds)
+    result = safe_execute(service.files().delete(fileId=file_id))
+    
+    return result
+        
+
 def get_spreadsheet_data(creds, sheet_id, sheet_range):
     """
-    Get the a range of data from a spreadsheet.
+    Get a range of data from a google drive spreadsheet.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    sheet_id : string google drive file id of the spreadsheet to read.
+    
+    sheet_range : string of range of data to read from (in sheets API range format)
+    
+    Returns
+    -------
+    values : python 2D list of values read from that range.
     """
 
     service = build("sheets", "v4", credentials=creds)
@@ -173,9 +431,23 @@ def get_spreadsheet_data(creds, sheet_id, sheet_range):
         
     return values
 
-def update_cell(creds, spreadsheet_id, sheet_range, value):
+def update_cell(creds, sheet_id, sheet_range, value):
     """
-    Update a single cell in the spreadsheet
+    Update a single cell in the spreadsheet to a specific value.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    sheet_id : string google drive file id of the spreadsheet to read.
+    
+    sheet_range : string of range of data to read from (in sheets API range format)
+    
+    value : string value to write (raw) to cell.
+    
+    Returns
+    -------
+    result : result of request.execute() API call
     """    
     
     values = [[value]]
@@ -184,7 +456,7 @@ def update_cell(creds, spreadsheet_id, sheet_range, value):
     service = build('sheets', 'v4', credentials=creds)
     
     result = safe_execute(service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
+        spreadsheetId=sheet_id,
         range=sheet_range,
         valueInputOption="RAW",
         body=body
@@ -194,22 +466,39 @@ def update_cell(creds, spreadsheet_id, sheet_range, value):
         
 def add_summary(creds, sheet_id, submission, data, img_id):
     """
-    Add an entry to the weekly summary spreadsheet
+    Function to add an entry to the weekly summary spreadsheet.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    sheet_id : string google drive file id of the spreadsheet to read.
+    
+    submission : the submission data read from the submission spreadsheet
+    
+    data : processed data from cosmic_on_air function.
+    
+    img_id : string google drive file id of the data image.
+    
+    Returns
+    -------
+    result of request.execute() API call    
     """
+    # formulate list to write to spreadsheet
     values = [[
         submission[0], # submission timestamp
         submission[1], # submission email
-        submission[7], # optional comment
+        submission[9], # optional comment
         data['flight_number'], 
         str(data['date']), 
-        data['device_id'], 
+        data['detector'] + " " + data['detector_serial'], 
         img_id # image id for image of data summary
     ]]
     
     body = {'values': values}
     
+    # execute AP call
     service = build('sheets', 'v4', credentials=creds)
-    
     result = safe_execute(service.spreadsheets().values().append(
         spreadsheetId=sheet_id,
         range="Sheet1!A1", # API uses this to figure out where the end of the data block is
@@ -219,91 +508,49 @@ def add_summary(creds, sheet_id, submission, data, img_id):
 
     return result
         
-def clear_range(creds, spreadsheet_id, sheet_range):
+def clear_range(creds, sheet_id, sheet_range):
     """
-    Clear a range of data from the spreadsheet.
+    Clear a range of data from the google spreadsheet.
+    
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    sheet_id : string google drive file id of the spreadsheet to read.
+    
+    sheet_range : string of range of data to delete (in sheets API range format)
+    
+    Returns
+    -------
+    result of request.execute() API call  
     """
     
     service = build('sheets', 'v4', credentials=creds)
     
     result = safe_execute(service.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id,
+        spreadsheetId=sheet_id,
         range=sheet_range
     ))
     
     return result
 
-def create_folder(creds, folder_name, parent_id):
-    """
-    Create a folder on the google drive.
-    """
-    folder_metadata = {
-        "name": folder_name,
-        "mimeType": "application/vnd.google-apps.folder", # google drive folder
-        "parents": [parent_id]
-    }
-    
-    # create drive api client
-    service = build("drive", "v3", credentials=creds)
-    
-    folder = safe_execute(service.files().create(body=folder_metadata, fields="id"))
-        
-    return folder["id"]
-    
-def upload_file(creds, local_path, parent_id):
-    filename = os.path.basename(local_path)
-    
-    # Wrap the local file for upload
-    media = MediaFileUpload(local_path, resumable=True)
-    
-    file_metadata = {
-        "name": filename,
-        "parents": [parent_id]
-    }
-    
-    # create drive api client
-    service = build("drive", "v3", credentials=creds)
-    
-    # Create the file in Drive
-    uploaded_file = safe_execute(service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id"
-    ))
-        
-    return uploaded_file["id"]
-
-def update_file(creds, local_path, file_id):
-    # Wrap the local file for upload
-    media = MediaFileUpload(local_path, resumable=True)
-    
-    # create drive api client
-    service = build("drive", "v3", credentials=creds)
-    
-    result = safe_execute(service.files().update(
-        fileId=file_id,
-        media_body=media,
-    ))
-    
-    return result
-        
-def delete_file(creds, file_id):    
-    service = build("drive", "v3", credentials = creds)
-    
-    result = safe_execute(service.files().delete(fileId=file_id))
-    
-    return result
-        
 def gmail_send_message(creds, raw_msg):
-    """Create and send an email message
-    Print the returned  message id
-    Returns: Message object, including message id
+    """
+    Send a Gmail email message.
+    The message id is printed to console and returned.
     
-    Load pre-authorized user credentials from the environment.
-    TODO(developer) - See https://developers.google.com/identity
-    for guides on implementing OAuth2 for the application.
+    Parameters
+    ----------
+    creds : google API credentials object to use in request.
+    
+    raw_msg : Gmail API encoded raw message to send.
+    
+    Returns
+    -------
+    message_id : id of the email that was produced and sent.
     """
     
+    # create service for gmail API
     service = build("gmail", "v1", credentials=creds)
     
     
@@ -318,11 +565,31 @@ def gmail_send_message(creds, raw_msg):
     print(f'Message Id: {result["id"]}')
     return result["id"]
         
-def error_email(sender, error, traceback, extra):
+def error_email(sender, contact, error, traceback, extra):
+    """
+    Function to create an error email object.
+
+    Parameters
+    ----------
+    sender : string email of sender.
+    
+    contact : string email of person to send error email to.
+    
+    error : string of the error that occured.
+    
+    traceback : string of the error traceback.
+    
+    extra : string of extra information of error.
+
+    Returns
+    -------
+    raw_msg : Gmail API encoded raw message to send.
+    """
+    
     message = EmailMessage()
     message.set_content(error + "\n" + extra + "\n" + traceback)
     
-    message["To"] = sender
+    message["To"] = contact
     message["From"] = sender
     message["Subject"] = "An error occured in the coa test script"
     
@@ -331,14 +598,30 @@ def error_email(sender, error, traceback, extra):
     
     return {"raw": encoded_message}
         
-def result_email(sender, form_submission, image_path, zip_path):
-    #TODO revert back to no zip file now that file size is smaller
-    timestamp = form_submission[0]
-    to = form_submission[1]
-    name = form_submission[2]
+def result_email(sender, submission, image_path, html_path):
+    """
+    Function to create a result email to send to citizens after their data has been processed.
+    
+    Parameters
+    ----------
+    sender : string email of sender.
+    
+    submission : the submission data read from the submission spreadsheet.
+    
+    image_path : path of the image to embed into the email.
+    
+    html_path : path of the html file to attach to the email.
+    
+    Returns
+    -------
+    raw_msg : Gmail API encoded raw message to send.
+    """
+    
+    timestamp = submission[0]
+    to = email_with_name(submission[1], submission[2])
+    name = submission[2]
 
-    # TODO in final version, the names must be replaced with Cosmic On Air
-    subject = f"CoA Test Automation – Your Flight Radiation Data [{timestamp}]" # timestamp
+    subject = f"Cosmic On Air – Your Flight Radiation Data [{timestamp}]" # timestamp
 
     body_msg = f"""
     <p>Hello {name},</p>
@@ -346,16 +629,16 @@ def result_email(sender, form_submission, image_path, zip_path):
     <p>We have now completed processing your submission to the Cosmic On Air Google Form.</p>
 
     <p>Below is an embedded image summarising the radiation dose data collected during your flight.  
-    Additionally, an interactive HTML file of your results is provided inside a ZIP archive to reduce size. 
-    Please download and unzip the file before opening it in your browser. A desktop browser is recommended 
+    Additionally, an interactive HTML file of your results is provided. 
+    You can open the html file in your preferred web browser. A desktop browser is recommended 
     for optimal scaling and reliability, as mobile browsers may not fully support interactive features.
-    The file features interactive graphs and a world map.</p>
+    The file features an interactive world map and graphs.</p>
 
     <p>Please note: this is an automated email.<br> 
-    If you included comments in your form submission, our team will review and respond within 7 days.</p>
+    If you included comments in your form submission, our team will review and respond within 14 days.</p>
 
     <p>Kind regards,<br>
-    Aidan's Test Program</p>
+    Cosmic On Air Team</p>
     """
     # Root message
     message = MIMEMultipart('related')
@@ -376,28 +659,48 @@ def result_email(sender, form_submission, image_path, zip_path):
     """
     msg_alternative.attach(MIMEText(html_body, 'html'))
 
-    # Attach image
+    # embed image
     with open(image_path, 'rb') as f:
         img = MIMEImage(f.read())
         img.add_header('Content-ID', '<image1>')
         message.attach(img)
     
-    # zip file attachment
-    filename = "results.zip"
-    with open(zip_path, "rb") as f:
-        mime_part = MIMEBase('application', 'zip')
+    # html file attachment
+    filename = "results.html"
+    with open(html_path, "rb") as f:
+        mime_part = MIMEBase('text', 'html')
         mime_part.set_payload(f.read())
 
+    # Encode the payload in base64
     encoders.encode_base64(mime_part)
     mime_part.add_header('Content-Disposition', 'attachment', filename=filename)
     message.attach(mime_part)
 
         
-    # Encode for Gmail API
+    # Encode email for Gmail API
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     return {'raw': raw}
         
 def summary_email(sender, to, date, values, images):
+    """
+    Function to create a weekly summary email to send to coa team.
+    
+    Parameters
+    ----------
+    sender : string email of sender.
+    
+    to : string email of person to send email to.
+    
+    date : string of date of weekly summary email.
+    
+    values : 2D array of values from weekly summary spreadsheet
+    
+    images : list/tuple of image path strings for the images to attach to email.
+    
+    Returns
+    -------
+    raw_msg : Gmail API encoded raw message to send.
+    """
     
     message = EmailMessage()
     
@@ -405,30 +708,34 @@ def summary_email(sender, to, date, values, images):
     message["From"] = sender
     message["Subject"] = f"Weekly summmary for {date}"
     
+    # if there are no new submissions, send appropriate email
     if len(values) == 0:
-        body = ("Dear Aidan (testing program),"
+        body = ("Dear Cosmic On Air Team,"
                 + f"\n\nThere are no new data submissions for {date}."
-                + "\n\nRegards,\nAutomated Cosmic on Air script")
+                + "\n\nRegards,\nAutomated Cosmic on Air Script")
         
         message.set_content(body)
+        
+    # else if there are new submissions, send email summarising submissions
     else:
-        # TODO address to team "Cosmic on Air Team"
         body = (
-            "Dear Aidan (testing program),"
+            "Dear Cosmic On Air Team,"
             + f"\n\nBelow is a list of the {len(values)} new submissions for {date}:"
             + "\nAdditionally, images of the data summary for each submission are attached."
         )
         
+        # include summary blurb for each submission
         for idx, value in enumerate(values):
             row = f"\n\n\t{idx+1}. {value[0]}, {value[1]}, \n\t\t{value[3]} {value[4]}, {value[5]},"
             row += f'\n\t\tOptional comment: "{value[2]}".'
             
             body += row
         
-        body += "\n\nRegards,\nAutomated Cosmic on Air script"
+        body += "\n\nRegards,\nAutomated Cosmic on Air Script"
         
         message.set_content(body)
         
+        # attach images to email
         for image in images:            
             # Attach an image
             with open(image, "rb") as f:
@@ -445,87 +752,113 @@ def summary_email(sender, to, date, values, images):
     
     return {"raw": encoded_message}
 
+##################################################################################################
+# Script to process results
+
+# Get google OAuth credentials
 creds = get_creds()
 
+# create a temporary directory to handle all files in
 with tempfile.TemporaryDirectory() as tmpdirname:
-    values = get_spreadsheet_data(creds, form_sheet_id, data_range)
-    currated_values = []
+    # fetch latest list of values in submission spreadsheet
+    values = get_spreadsheet_data(creds, form_sheet_id, submission_range)
     
+    # adjust list to ensure correct dimensions and determine if there is new data
     new = False
-    
     for row in values:
+        # google sheets doesn't guarentee full A:I range, it trims off empty cells
+        while len(row) < 11:
+            row.append("")
+        
         if row[0] == "":
             continue
-        
-        # google sheets doesn't guarentee full A:I range, it trims off empty cells
-        while len(row) < 9: # google sheets doesn't guarentee full A:I range, it trims off empty cells
-            row.append("")
             
-        if row[8] != "y" and row[8] != "Y": # if the row is marked as processed
+        if row[10] != "y" and row[10] != "Y": # if the row is marked as processed
             new = True
         
-        currated_values.append(row)
-        
+    # if there are new submissions process these
     if new:
+        # download coa.db file from google drive and create database object to interact
+        # with existing database
         database_path = os.path.join(tmpdirname, "data_archive")
         os.makedirs(database_path)
-        
-        database_file = get_file(creds, coa_db_id, database_path)
+        database_file = get_file(creds, coa_db_id, database_path) # download file
         database_file = os.path.join(database_path, database_file)
-        
         db = ca_db.CoaDatabase(database_path, show_figures=False)
+        
+        # process each new response
+        for idx, row in enumerate(values):
+            # skip already processed responses
+            if row[10] == "y" or row[10] == "Y":
+                continue
             
-        for idx, row in enumerate(currated_values):
-            if row[8] == "y" or row[8] == "Y": # if the row is marked as processed
-                continue # already processed
-            
+            # TODO: add code to log errors with logging library
+            # wrap process in try block to handle logging
             try:
-                update_cell(creds, form_sheet_id, f"Form responses 1!I{idx+2}", "n")
+                # update file cell to 'n' to indicate currently processing
+                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "n")
+                
+                submission_date = datetime.strptime(row[0], "%m/%d/%Y %H:%M:%S")
+                row[0] = submission_date.strftime("%Y-%m-%d %H:%M:%S")
                 
                 print("Processing response: " + row[1] + " (" + row[0] + ")")
-                data_file = get_file(creds, extract_drive_id(row[5]), tmpdirname)
-                flight_file = get_file(creds, extract_drive_id(row[6]), tmpdirname)
                 
-                flight, data = db.add(data_file, flight_file, citizen_id=row[1])
+                # download raw log and flight file
+                data_file = get_file(creds, extract_drive_id(row[7]), tmpdirname)
+                if row[8] != "": # check if flight file uploaded
+                    flight_file = get_file(creds, extract_drive_id(row[8]), tmpdirname)
+                else: # TODO change this once automatic flight path retrieval is added.
+                    raise FileExistsError("No flight file to process data with.")
                 
+                # process/add data to database
+                citizen_id = email_with_name(row[1], row[2])
+                
+                detector_serial = row[4]
+                if detector_serial == "": detector_serial = "UNKNOWN"
+                flight, data = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date)
+                
+                # get data_id and new log file of data
                 entry_id, processed_file = flight[0], flight[8]
                 processed_file = os.path.join(database_path, processed_file)
                 
-                entry_folder_id = create_folder(creds, entry_id, db_folder_id)
-                backup_folder_id = create_folder(creds, "backup", entry_folder_id)
-                
+                # create html figure of plot
                 fig = ca.plotly_plot(data)
                 
-                img_path = os.path.join(tmpdirname, f"{data['flight_number']} {data['date']} {data['device_id']}.png")
+                # create path names of image and html of figure to create
+                img_path = os.path.join(tmpdirname, f"{entry_id}.png")
                 html_path = os.path.join(tmpdirname, "html attachment.html")
-                zip_path = os.path.join(tmpdirname, "results.zip")
                 
-                fig.write_html(html_path, include_plotlyjs="cdn")
+                # create image and html of plotly figure
+                fig.write_html(html_path, include_plotlyjs="cdn") # use 'cdn' to minimize html file size
                 # don't forget. it requires you to install kaleido and pio.get_chrome()C:/Users/aidan/OneDrive - University of Cape Town/Cosmic On Air/Processed_data_12251023.log
                 fig.write_image(img_path, width=1300, height=600)
-                
-                # writing files to a zipfile
-                with ZipFile(zip_path,'w', ZIP_DEFLATED) as zip:
-                    zip.write(html_path, arcname="results.html")
-                
-                msg = result_email(sender_email, row, img_path, zip_path)
-                
+                                
+                msg = result_email(sender_email, row, img_path, html_path)
                 print("response message created.")
                 
-                update_cell(creds, form_sheet_id, f"Form responses 1!I{idx+2}", "y")
+                # change cell to 'y' for processed
+                # Note that the submission is labelled as processed before any other API interactions
+                # to avoid automatic reprocessing of submission incase of an error 
+                # (if an error occured it should definitely be processed manuaully/supervised)
+                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "y")
                 
-                if debug:
+                # email the citizen
+                if debug: # don't email in debug mode
                     print("In debug, response email sending disabled")
                 else:
-                    # extra condition: if the submission is older than 7 days, don't send email.
-                    timestamp = datetime.strptime(row[0], "%d/%m/%Y %H:%M:%S")
-                    if (datetime.now() - timestamp).days > max_delay:
-                        # TODO send logging warning to developer instead
+                    # only email if the submission is recent (within now - max_delay days).
+                    # TODO send logging warning to developer as well
+                    if (datetime.now() - submission_date).days > max_delay:
                         print("Warning: submission older than 7 days, not sending email")
                     else:
                         gmail_send_message(creds, msg)
                 
+                # update coa.db file
                 update_file(creds, database_file, coa_db_id)
+                # create google drive folders for new database entry
+                entry_folder_id = create_folder(creds, entry_id, db_folder_id)
+                backup_folder_id = create_folder(creds, "backup", entry_folder_id)
+                # upload processed log, raw log and flight kml
                 upload_file(creds, data_file, backup_folder_id)
                 upload_file(creds, flight_file, backup_folder_id)
                 upload_file(creds, processed_file, entry_folder_id)
@@ -534,40 +867,49 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 img_id = upload_file(creds, img_path, summary_folder_id)
                 add_summary(creds, summary_sheet_id, row, data, img_id)
                 
+                # delete local files
                 os.remove(data_file)
                 os.remove(flight_file)
                 os.remove(html_path)
                 os.remove(img_path)
-                os.remove(zip_path)
                 
                 print("Finished processing response.")
+                
+            # TODO create appropriate logging module error
             except Exception as e:
                 tb_str = traceback.format_exc()
                 #gmail_send_message(error_email(sender_email, str(e), tb_str, str(row)))
                 raise
                 
-    #handle weekly summary
+    # now handle weekly summary
+    
+    # retrieve week number of most recent summary email
     values = get_spreadsheet_data(creds, summary_sheet_id, summary_week)
     sheet_week_number = int(values[0][0])
         
+    # get current week number
     iso_calender = datetime.now().isocalendar()
     week, year = iso_calender.week, iso_calender.year
     
     # if the numbers disagree, a new weekly summary email is due
     if sheet_week_number != week:
         print("Creating weekly summary.")
+        
+        # handle edge case of week number being greater than now, hence year overflow
         if sheet_week_number > week:
             year -= 1
-        date_str = f"Week {sheet_week_number} of {year}"
-            
-        values = get_spreadsheet_data(creds, summary_sheet_id, summary_range)
-        images = []
         
-        # download all the images for the summary
+        date_str = f"Week {sheet_week_number} of {year}"
+        
+        # get the 2D list of values from the weekly summary spreadsheet
+        values = get_spreadsheet_data(creds, summary_sheet_id, summary_range)
+        
+        # download all the images to include in the summart email
+        images = []
         for row in values:
             images.append(get_file(creds, row[6], tmpdirname))
         
-        msg = summary_email(sender_email, "aidan.gebbie@outlook.com", date_str, values, images)
+        msg = summary_email(sender_email, summary_recipients, date_str, values, images)
         
         print("Email created.")
         
@@ -575,11 +917,9 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         
         print("Email sent.")
         
+        # reset weekly summary spreadsheet and delete images
         update_cell(creds, summary_sheet_id, summary_week, str(week))
         clear_range(creds, summary_sheet_id, summary_range)
-        
-        #TODO consider turning this into a batch request https://github.com/googleapis/google-api-python-client/blob/main/docs/batch.md
         for row in values:
             delete_file(creds, row[6]) # delete image on drive
-
         

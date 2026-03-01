@@ -15,7 +15,7 @@ Structure and format of the database:
     *   a coa.db file is found in the database folder. It follows an SQLite database format
         and can be editted by the code, or even directly using software such as SQLiteStudio
     *   data measurements in a folder structure following this format:
-        > data_id     (unique id in the format FLIGHTNUMBER YYYY-MM-DD device_id)
+        > data_id     (unique id in the format FLIGHTNUMBER YYYY-MM-DD detector_id)
              |>  Data data_id.log
              |>  backup             (folder containing original data)
                      |> *flight_file*
@@ -26,7 +26,7 @@ Structure and format of the database:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 10 Feb 2026
+Version: 1 Mar 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -37,10 +37,11 @@ A. Gebbie, Department of Physics, University of Cape Town, South Africa
 import sqlite3
 import cosmic_on_air as coa
 import os
-import shutil
+import shutil, stat
 import airportsdata
 from iso3166 import countries # to retrieve country name since airportsdata only stores country code
 import plotly.io as pio
+from datetime import datetime
 
 class CoaDatabase:
     def __init__(self, path, new_db=False, show_figures=True, include_plotlyjs=True):
@@ -103,7 +104,7 @@ class CoaDatabase:
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS flights (
             data_id TEXT PRIMARY KEY,
-            device_id TEXT,
+            detector_id TEXT,
             flight_number TEXT,
             departure_airport TEXT NOT NULL,
             arrival_airport TEXT NOT NULL,
@@ -114,6 +115,7 @@ class CoaDatabase:
             old_log TEXT,
             old_flight TEXT,
             citizen_id TEXT,
+            submission_date TEXT,
             FOREIGN KEY (departure_airport) REFERENCES airports(icao),
             FOREIGN KEY (arrival_airport) REFERENCES airports(icao)
         )
@@ -158,6 +160,27 @@ class CoaDatabase:
         
         return [d[0] for d in rows]
     
+    def get_entry(self, data_id):
+        """
+        Get the full entry of a given data_id.
+        
+        Parameters
+        ----------
+        data_id : string of the unique data_id of the entry being searched for.
+        
+        Returns
+        -------
+        entry : a tuple of the entry.
+        """
+        cursor = self.connect()
+        try:
+            cursor.execute("SELECT * FROM flights WHERE data_id = ?", (data_id,))
+            entry = cursor.fetchall()
+        finally:
+            self.close()
+        
+        return entry
+    
     def get_entries(self):
         """
         Get a list of all full entries in the database.
@@ -174,6 +197,47 @@ class CoaDatabase:
             self.close()
         
         return rows
+    
+    def get_all_data(self):
+        """
+        Get a list of all full flight datasets in the database.
+        
+        Returns
+        -------
+        entries : a list of all the dictionaries of data in the database.
+        """
+        
+        entries = self.get_entries()
+        
+        data = []
+        
+        for entry in entries:            
+            file = os.path.join(self.db_path, entry[8])
+            data.append(coa.read_processed_log(file))
+        
+        return data
+    
+    def plot_all_data(self, figure_dest=""):
+        """
+        Get a plotly world map plot of all the data in the database (that have scaling factors)
+        
+        Returns
+        -------
+        fig : a list of all the dictionaries of data in the database.
+        """
+        
+        fig = coa.plot_all(self.get_all_data())
+        
+        if self.show:
+            fig.show()    
+            
+        if os.path.isdir(figure_dest):
+            filename = ("all_flights.html")
+            print(f"Figure saved as '{filename}'")
+            name = os.path.join(figure_dest, filename)
+            fig.write_html(name, include_plotlyjs=self.include_plotlyjs)
+        
+        return fig
         
     def search(self, keywords, exact=False):
         """
@@ -183,7 +247,7 @@ class CoaDatabase:
         ----------
         keywords : A dictionary of all the keywords. Not all keywords are required to be provided.
             Valid keys to search with are:
-        *   'device_id' : the name of the measuring device (e.g. Safecast 1124) 
+        *   'detector_id' : the name of the measuring detector (e.g. Safecast 1124) 
         *   'flight_number' : the name of the flight (e.g. AFR995)
         *   'fit' : How well the measurement fits the CARI-7A reference (number between 0.0 and 1.0)
         *   'dept_airport' : ICAO/IATA/city-name of the departing airport
@@ -197,13 +261,13 @@ class CoaDatabase:
         Returns
         -------
         items : A list of tuples of the metadata for matching flights, including:
-            unique data_id id, device id, flight number, 
+            unique data_id id, detector id, flight number, 
             origin ICAO, destination ICAO, takeoff time, landing time, reference fit,
             relative path to processed data, relative path to raw data,
             relative path to flight data, additional airport information
 
         """
-        for key in ['device_id', 'flight_number', 'fit',
+        for key in ['detector_id', 'flight_number', 'fit',
                     'dept_airport', 'dest_airport', 'takeoff', 'landing']:
             if key not in keywords:
                 keywords[key] = "%"
@@ -237,7 +301,7 @@ class CoaDatabase:
         FROM flights f
         JOIN airports o ON o.icao = f.departure_airport
         JOIN airports d ON d.icao = f.arrival_airport
-        WHERE f.device_id LIKE ?
+        WHERE f.detector_id LIKE ?
           AND f.flight_number LIKE ?
           AND f.departure_time LIKE ? 
           AND f.arrival_time LIKE ?
@@ -250,7 +314,7 @@ class CoaDatabase:
         try:
             # Query: list all flights with departure/arrival airport names
             cursor.execute(query, 
-                           (keywords['device_id'], keywords['flight_number'], 
+                           (keywords['detector_id'], keywords['flight_number'], 
                             keywords['takeoff'], keywords['landing'], keywords['fit'],
                             keywords['dept_airport'], keywords['dest_airport']))
             
@@ -287,16 +351,17 @@ class CoaDatabase:
         
         return data
     
-    def add(self, log_file, flight_file="", citizen_id="UNKNOWN", parallel=8, time_delta=-1):
+    def add(self, log_file, flight_file="", detector_id="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, parallel=8, time_delta=-1):
+        # TODO : update function description
         """
-        Method to add a new device measurement to the database.
+        Method to add a new detector measurement to the database.
         
         Parameters
         ----------
-        log_file: Absolute path to the device log file to add to the database.
+        log_file: Absolute path to the detector log file to add to the database.
         
         flight_file : Absolute path to the flight ADS-B file to add to the database
-            (default: ""; can be left blank, and read_raw_log function will instead use device gps)
+            (default: ""; can be left blank, and read_raw_log function will instead use detector gps)
         
         citizen_id : identity of the individual who submitted the data
             (default: "UNKNOWN")
@@ -310,7 +375,8 @@ class CoaDatabase:
         time_delta : default=-1. If greater than 0, the software will attempt to recover corrupted timestamps in data
             the value it is set to will be the delta time used between measurements if the end timestamp is corrupted.
         """
-        data = coa.read_raw_log(log_file, flight_file, citizen_id=citizen_id, parallel=parallel, time_delta=time_delta)
+        
+        data = coa.read_raw_log(log_file, flight_file, detector=detector_id, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta)
         
         if self.show:
             coa.plotly_plot(data).show()
@@ -351,7 +417,7 @@ class CoaDatabase:
             cursor.executemany("INSERT OR IGNORE INTO airports VALUES (?, ?, ?, ?, ?)", airports)
             
             flight = (data_id, 
-                      data['device_id'], 
+                      data['detector'] + " " + data['detector_serial'], 
                       data['flight_number'], 
                       dept['icao'],
                       dest['icao'], 
@@ -359,16 +425,11 @@ class CoaDatabase:
                       data['landing'].strftime("%Y-%m-%d %H:%M:%S"),
                       data['R2'], 
                       rel_path, old_log, old_flight,
-                      citizen_id
+                      citizen_id,
+                      data['submission_date']
             )
             
-            cursor.execute(
-            """
-            INSERT INTO flights 
-            (data_id, device_id, flight_number, departure_airport, arrival_airport, 
-            departure_time, arrival_time, reference_R2, data_file, old_log, old_flight, citizen_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, flight)
+            cursor.execute("INSERT INTO flights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", flight)
             
             # create folder and copy files into archive
             os.makedirs(backup_folder)
@@ -448,8 +509,18 @@ class CoaDatabase:
         if item[11] == "" or item[11] == None:
             citizen_id = "UNKNOWN"
             
+        try:
+            submission_date = datetime.strptime(item[12], "%Y-%m-%dT%H:%M:%SZ")
+        except:
+            submission_date = None
+        
+        detector_id = item[1]
+        splitup = detector_id.strip().split(" ")
+        serial = splitup[-1]
+        detector = "".join(splitup[:-1])
+            
         # Reprocess the data
-        data = coa.read_raw_log(raw_log, raw_flight, citizen_id=citizen_id, parallel=8, time_delta=time_delta, disable_cari_weather=disable_cari_weather)
+        data = coa.read_raw_log(raw_log, raw_flight, detector=detector, detector_serial=serial, citizen_id=citizen_id, submission_date=submission_date, parallel=8, time_delta=time_delta, disable_cari_weather=disable_cari_weather)
         data_id = coa.data_id(data)
         
         # update all file and folder names
@@ -488,7 +559,7 @@ class CoaDatabase:
             cursor.executemany("INSERT OR IGNORE INTO airports VALUES (?, ?, ?, ?, ?)", airports)
             
             flight = (data_id, 
-                      data['device_id'], 
+                      data['detector'] + " " + data['detector_serial'], 
                       data['flight_number'], 
                       dept['icao'],
                       dest['icao'], 
@@ -496,16 +567,11 @@ class CoaDatabase:
                       data['landing'].strftime("%Y-%m-%d %H:%M:%S"),
                       data['R2'], 
                       rel_path, raw_log, raw_flight,
-                      citizen_id
+                      data['citizen_id'],
+                      data['submission_date']
             )
             
-            cursor.execute(
-            """
-            INSERT INTO flights 
-            (data_id, device_id, flight_number, departure_airport, arrival_airport, 
-            departure_time, arrival_time, reference_R2, data_file, old_log, old_flight, citizen_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, flight)
+            cursor.execute("INSERT INTO flights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", flight)
         
             # Save changes and close
             self.commit()
@@ -517,7 +583,7 @@ class CoaDatabase:
             self.close()
             
         print(f"Reprocessed {data_id}.")
-            
+    
     def delete(self, data_id, prompt_confirm=True):
         """
         Delete the entry from the database with the matching data_id unique key.
@@ -550,6 +616,10 @@ class CoaDatabase:
         try:
             folder = os.path.dirname(os.path.join(self.db_path, item[8]))
             
+            # ensure that cloud storage drives don't interfere and mark folders as read only
+            os.chmod(folder, stat.S_IWRITE)
+            os.chmod(os.path.join(folder, "backup"), stat.S_IWRITE)
+
             shutil.rmtree(folder)
             cursor.execute("DELETE FROM flights WHERE data_id = ?", (item[0],))
             
@@ -639,18 +709,18 @@ class CoaDatabase:
                 
                 if self.show:
                     fig.show()
+                    
+                data_name = coa.data_id(datum).replace(" ", "_")
                 
                 if os.path.isdir(figure_dest):
                     filename = ("Figure_" + 
-                                datum['flight_number'] + "_" + 
-                                datum['date'].strftime("%Y-%m-%d") + "_" +
-                                datum['device_id'] + ".html")
+                                data_name + ".html")
                     name = os.path.join(figure_dest, filename)
                     fig.write_html(name, include_plotlyjs=self.include_plotlyjs)
         
         return figs
         
-    def export(self, keywords, destination_path):
+    def export_db(self, keywords, destination_path, include_html=False):
         """
         Export the selected flights to a destination folder, copying the data from
         the database as is, and including a figure .html file as well.
@@ -674,9 +744,14 @@ class CoaDatabase:
             
         destination_path = os.path.join(destination_path, "export") 
         
-        #intentionally only allow for one level of folder creation to minimize damage from error
+        # intentionally only allow for one level of folder creation to minimize damage from error
+        # due to incorrect input path
         if not os.path.isdir(destination_path):
             os.mkdir(destination_path)
+            
+        db = CoaDatabase(destination_path, show_figures=False, new_db=True)
+        
+        cursor = db.connect()
         
         for item in items:
             print(item[0].strip())
@@ -701,15 +776,158 @@ class CoaDatabase:
             
             # if there is an existing export by the same name in the folder, delete it
             if os.path.isdir(dest_folder):
+                os.chmod(dest_folder, stat.S_IWRITE)
+                if os.path.isdir(os.path.join(dest_folder, "backup")):
+                    os.chmod(os.path.join(dest_folder, "backup"), stat.S_IWRITE)
                 shutil.rmtree(dest_folder)
+            
             os.mkdir(dest_folder)
             
             # finally export data
             coa.write_newlog(data, data_file)
-            fig.write_html(fig_file, include_plotlyjs=self.include_plotlyjs)
+            if include_html:
+                fig.write_html(fig_file, include_plotlyjs=self.include_plotlyjs)
+            
             shutil.copytree(backup, backup_dest)
+            
+            try:
+                # add updated entry to database
+                flight = item [0:13]
+                airports = [
+                    item[13:18],
+                    item[18:]
+                ]
+                
+                cursor.executemany("INSERT OR IGNORE INTO airports VALUES (?, ?, ?, ?, ?)", airports)
+                         
+                cursor.execute("DELETE FROM flights WHERE data_id = ?", (item[0],))
+                cursor.execute("INSERT INTO flights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", flight)
+            
+                # Save changes and close
+                db.commit()
+                
+            except Exception:
+                db.rollback()   # Undo all changes since the transaction began
+                db.close()
+                raise
+        db.close()
 
-
+    def import_db(self, import_path, reprocess=False):
+        """
+        Import flights from the selected external database, copying the data as is from
+        the other database into this one.
+        
+        Optionally, data can then all be reprocessed to ensure it is in an up to date format.
+        
+        Parameters
+        ----------
+        import_path : absolute path to folder of the database to import from.
+        
+        reprocess : (default=False) If true, entries will all be reprocessed after they
+            are imported.
+        """
+        
+        # get list of items from other database
+        
+        db = CoaDatabase(import_path, show_figures=False)
+        items = db.get_entries()
+        
+        # identify items already in the main database
+        existing_items = self.get_ids()
+        for i in range(len(items) - 1, -1, -1):
+            if items[i][0] in existing_items:
+                del items[i]
+        
+        if not items:
+            print("No new entries in import database...")
+            return
+        
+        airports = airportsdata.load("ICAO")
+        
+        for item in items:            
+            print(item[0].strip())
+            
+            file = os.path.join(db.db_path, item[8])
+            data = coa.read_processed_log(file)
+                        
+            if self.show:
+                fig = coa.plotly_plot(data)
+                fig.show()
+            
+            # create destination path names
+            data_id = coa.data_id(data)
+            
+            dest_folder = os.path.join(self.db_path, data_id)
+            dest_backup = os.path.join(dest_folder, "backup")
+            
+            backup_log = os.path.join(db.db_path, item[9])
+            backup_flight = os.path.join(db.db_path, item[10])
+            
+            new_backup_log = os.path.join(dest_backup, os.path.basename(item[9]))
+            new_backup_flight = os.path.join(dest_backup, os.path.basename(item[10]))
+            
+            data_file = os.path.join(dest_folder, f"Data {data_id}.log")
+            
+            rel_path = os.path.join(data_id, f"Data {data_id}.log")
+            raw_log = os.path.join(data_id, "backup", os.path.basename(item[9]))
+            raw_flight = os.path.join(data_id, "backup", os.path.basename(item[10]))
+                        
+            os.mkdir(dest_folder)
+            os.mkdir(dest_backup)
+            
+            # finally import data
+            coa.write_newlog(data, data_file)
+            shutil.copy(backup_log, new_backup_log)
+            shutil.copy(backup_flight, new_backup_flight)
+            
+            dept = airports.get(data['origin ICAO'])
+            dest = airports.get(data['destination ICAO'])
+            
+            try:
+                # add updated entry to database
+                airport_data = [
+                    (dept['icao'], dept['iata'], dept['name'], dept['city'], countries.get(dept['country']).name),
+                    (dest['icao'], dest['iata'], dest['name'], dest['city'], countries.get(dest['country']).name)
+                ]
+                
+                flight = (data_id, 
+                          data['detector'] + " " + data['detector_serial'], 
+                          data['flight_number'], 
+                          dept['icao'],
+                          dest['icao'], 
+                          data['takeoff'].strftime("%Y-%m-%d %H:%M:%S"), 
+                          data['landing'].strftime("%Y-%m-%d %H:%M:%S"),
+                          data['R2'], 
+                          rel_path, raw_log, raw_flight,
+                          data['citizen_id'],
+                          data['submission_date']
+                )
+                
+                cursor = self.connect()
+                
+                cursor.executemany("INSERT OR IGNORE INTO airports VALUES (?, ?, ?, ?, ?)", airport_data)
+                         
+                cursor.execute("DELETE FROM flights WHERE data_id = ?", (item[0],))
+                cursor.execute("INSERT INTO flights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", flight)
+            
+                # Save changes and close
+                self.commit()
+                
+            except Exception:
+                self.rollback()   # Undo all changes since the transaction began
+                raise
+            finally:
+                self.close()
+        
+        # Finally, reprocess the data if needed.
+        if reprocess:
+            i = 0
+            total = len(items)
+            
+            for item in items:
+                i += 1
+                print(f"Reprocessing {data_id}, {i}/{total}.")
+                self.reprocess(item[0], prompt_confirm=False)
 
 ##########################################################################################
 # Below is a Command Line Interface script to interact with the database from a console.
@@ -727,7 +945,7 @@ if __name__ == "__main__":
             break
         database_file = input("What is the absolute path to the database .db file?\n")
         
-    db = CoaDatabase(database_path, show_figures=True, include_plotlyjs="cdn")
+    db = CoaDatabase(database_path, show_figures=True)
         
     # CLI for user to interact with database
     while True:
@@ -735,15 +953,19 @@ if __name__ == "__main__":
         
         print("Enter a number to select an option:")
         print("1. List all entries in the archive.")
-        print("2. Search keyword and plot entries.")
-        print("3. Search keyword and plot entries to same axis.")
-        print("4. Export a data file.")
-        print("5. Add a data file.")
-        print("6. Reprocess a data file.")
-        print("7. Delete a data file.")
+        print("2. Plot all entries on world map.")
+        print("3. Search keyword and plot entries.")
+        print("4. Search keyword and plot entries to same axis.")
+        print("5. Export data.")
+        print("6. Import data.")
+        print("7. Add a data file.")
+        print("8. Reprocess a data file.")
+        print("9. Delete a data file.")
         print("q. Quit.")
         
         number = input()
+        
+        print()
         
         # quit
         if number == "q":
@@ -762,31 +984,39 @@ if __name__ == "__main__":
                 print(x)
             
             print(f"{len(ids)} entries in archive.")
+            
+        if number == 2:
+            figure_dest = input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\"")
+            
+            if not os.path.isdir(figure_dest):
+                figure_dest = ""
+            
+            db.plot_all_data(figure_dest=figure_dest)
         
         # Perform a search to plot figures or export
-        if number == 2 or number == 3 or number == 4:
+        if number == 3 or number == 4 or number == 5:
             print("For each category, enter keyword, OR enter nothing to skip")
-            device_id = input("device id: ").strip()
+            detector_id = input("detector id: ").strip()
             flight_number = input("flight number: ").strip()
             dept = input("departure city: ").strip()
             dest = input("destination city: ").strip()
             date = input("Flight date (YYYY-MM-DD): ").strip()
             fit = input("Fit of measured to CARI data [0.0,1.0]: ").strip()
             
-            keywords = {'device_id': device_id, 'flight_number': flight_number, 'fit': fit,
+            keywords = {'detector_id': detector_id, 'flight_number': flight_number, 'fit': fit,
                         'dept_airport': dept, 'dest_airport': dest, 'takeoff': date}
             
             # plot figures
-            if number == 2 or number == 3:
+            if number == 3 or number == 4:
                 figure_dest = input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\"")
                 
                 if not os.path.isdir(figure_dest):
                     figure_dest = ""
                 
-                db.find_and_plot(keywords, same_figure=(number==3), figure_dest=figure_dest)
+                db.find_and_plot(keywords, same_figure=(number==4), figure_dest=figure_dest)
             
             # export
-            if number == 4:
+            if number == 5:
                 while True:
                     dest_path = input("What folder would you like to copy the data to?\n")
                     if not os.path.isdir(dest_path):
@@ -794,10 +1024,23 @@ if __name__ == "__main__":
                         continue
                     break
                 
-                db.export(keywords, dest_path)
+                db.export_db(keywords, dest_path)
+                
+        # export
+        if number == 6:
+            while True:
+                import_path = input("What is the path to the database to import files from?\n")
+                reprocess = input("Do you want to reprocess the data after importing? Y/n\n")
+                reprocess = (reprocess=="Y")
+                if not os.path.isdir(import_path):
+                    print("Please provide an existing folder")
+                    continue
+                break
+            
+            db.import_db(import_path, reprocess=reprocess)
                 
         # add a measurement to the database  
-        if number == 5:
+        if number == 7:
             file = input("Enter a log file absolute path.\n")
             flight = input("Enter a flight file absolute path, or leave blank.\n")
             citizen_id = input("Enter the data collector's citizen id, or leave it blank.\n")
@@ -817,17 +1060,15 @@ if __name__ == "__main__":
                 print("Flight file path invalid.")
          
         # reprocess a measurement in the database
-        if number == 6:
+        if number == 8:
             data_id = input("Enter data_id to reprocess (e.g.AFR81 Safecast 1083)\n") + "%"
             
             db.reprocess(data_id)
          
         # delete a measurement from the database
-        if number == 7:
+        if number == 9:
             data_id = input("Enter data_id to delete (e.g.AFR81 Safecast 1083)\n") + "%"
             
             db.delete(data_id)
         
         # The CLI program then returns to its main menu to ask for another prompt.
-        
-#TODO: add import function, and include coa.db in export function
