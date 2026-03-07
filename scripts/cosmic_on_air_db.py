@@ -358,7 +358,7 @@ class CoaDatabase:
         
         return data
     
-    def add(self, log_file, flight_file="", detector_id="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, parallel=8, time_delta=-1):
+    def add(self, log_file, flight_file="", detector_id="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, parallel=8, time_delta=-1, raise_duplicate=True):
         # TODO : update function description
         """
         Method to add a new detector measurement to the database.
@@ -381,6 +381,17 @@ class CoaDatabase:
             
         time_delta : default=-1. If greater than 0, the software will attempt to recover corrupted timestamps in data
             the value it is set to will be the delta time used between measurements if the end timestamp is corrupted.
+        
+        raise_duplicate : default=True. If true, it will raise an error if the flight is already in the database,
+            else it will silence the error, not modify the database, but still return the processed data dictionary.
+        
+        Returns
+        -------
+        flight : tuple of values for the data details that is added to coa.db SQL
+        
+        data : dictionary of values of the processed radiation data
+        
+        unique : True if the data was new and hence added to the database, otherwise false.
         """
         
         data = coa.read_raw_log(log_file, flight_file, detector=detector_id, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta, show_progress=self.show_progress)
@@ -415,6 +426,8 @@ class CoaDatabase:
         # add info to .db file
         cursor = self.connect()
         
+        unique = True
+        
         try:
             # add entries to database
             airports = [
@@ -446,13 +459,18 @@ class CoaDatabase:
             coa.write_newlog(data, new_log)
             
             self.commit()
+        except sqlite3.IntegrityError:
+            self.rollback()
+            unique = False
+            if raise_duplicate:
+                raise
         except Exception:
             self.rollback()   # Undo all changes since the transaction began
             raise
         finally:
             self.close()
         
-        return flight, data # returns entry as well
+        return flight, data, unique # returns entry as well
              
     def reprocess(self, data_id, prompt_confirm=True, time_delta=-1, disable_cari_weather=True):
         """

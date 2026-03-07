@@ -1571,7 +1571,7 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
                         
             offset += widths[p]
     
-        print("Generated files for CARI-7A to predict radiation")
+        print("Generated files for CARI-7A to predict radiation.")
     
         try:
             instances = []
@@ -1617,8 +1617,8 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
                 if p.poll() is None:
                     p.wait()
 
-        print()
-        print("CARI-7A data generated")
+        if show_progress: print()
+        print("CARI-7A data generated.")
         
         offset = 0
         for p in range(parallel):
@@ -1648,7 +1648,7 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
     cari_data['total'] = interp_total
     cari_data['total-neutron'] = interp_total - interp_neutron
     
-    print(f"CARI-7A Runtime: {(time.time() - start_time):.2f} s")
+    print(f"CARI-7A Runtime: {(time.time() - start_time):.2f} s.")
         
     return cari_data
 

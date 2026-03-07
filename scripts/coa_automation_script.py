@@ -160,7 +160,7 @@ def get_creds():
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first time.
     if os.path.exists(token_path):
-        print("found token file")
+        print("found token file.")
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
     
     # If there are no (valid) credentials available, let the user log in.
@@ -875,7 +875,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 # update file cell to 'n' to indicate currently processing
                 update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "n")
                                 
-                print("Processing response: " + row[1] + " (" + row[0].strftime("%Y-%m-%d %H:%M:%S") + ")")
+                print(f"\nProcessing response: {row[1]} ({row[0]})")
                 
                 # download raw log and flight file
                 data_file = get_file(creds, extract_drive_id(row[7]), tmpdirname)
@@ -886,7 +886,10 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 
                 detector_serial = row[4]
                 if detector_serial == "": detector_serial = "UNKNOWN"
-                flight, data = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=row[0])
+                flight, data, unique = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=row[0], raise_duplicate=False)
+                
+                if not unique:
+                    print("Warning: data already in database.")
                 
                 # get data_id and new log file of data
                 entry_id, processed_file = flight[0], flight[8]
@@ -924,15 +927,16 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                     else:
                         gmail_send_message(creds, msg)
                 
-                # update coa.db file
-                update_file(creds, database_file, coa_db_id)
-                # create google drive folders for new database entry
-                entry_folder_id = create_folder(creds, entry_id, db_folder_id)
-                backup_folder_id = create_folder(creds, "backup", entry_folder_id)
-                # upload processed log, raw log and flight kml
-                upload_file(creds, data_file, backup_folder_id)
-                upload_file(creds, flight_file, backup_folder_id)
-                upload_file(creds, processed_file, entry_folder_id)
+                if unique:
+                    # update coa.db file
+                    update_file(creds, database_file, coa_db_id)
+                    # create google drive folders for new database entry
+                    entry_folder_id = create_folder(creds, entry_id, db_folder_id)
+                    backup_folder_id = create_folder(creds, "backup", entry_folder_id)
+                    # upload processed log, raw log and flight kml
+                    upload_file(creds, data_file, backup_folder_id)
+                    upload_file(creds, flight_file, backup_folder_id)
+                    upload_file(creds, processed_file, entry_folder_id)
                 
                 # add to weekly summary list
                 img_id = upload_file(creds, img_path, summary_folder_id)
@@ -964,7 +968,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
             gmail_send_message(creds, msg)
             
     else:
-        print("no new submissions")
+        print("no new submissions.")
     
     # now handle weekly summary
     
@@ -1014,4 +1018,4 @@ if errors:
         
     raise Exception(f"{len(errors)} errors occured: {errors}")
 else:
-    print("Script ended without errors")
+    print("Script ended without errors.")
