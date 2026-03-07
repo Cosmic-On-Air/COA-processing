@@ -158,7 +158,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
             detector_data = read_otherdata_csv(log_filename, detector="gmc")
         elif ("radiacode" in lowercase):
             detector_data = read_otherdata_csv(log_filename, detector="radiacode")
-        elif ("rium" in lowercase):
+        elif ("rium" in lowercase) or ("radconnect" in lowercase):
             detector_data = read_otherdata_csv(log_filename, detector="rium")
         else:
             raise ValueError("Unknown detector")
