@@ -1512,11 +1512,17 @@ def gen_cari_data(location, parallel=4, disable_weather=True):
     # Path to the original folder
     src = os.path.join(BASE_DIR, 'CARI_7A_DVD')
 
-    # change CARI-7A settings to work in non-menus mode
+    # change CARI-7A settings to work in non-menus mode (and possibly OS)
     ini_file = os.path.join(src, 'CARI.INI')
     with open(ini_file, "r+") as f:
         lines = f.readlines()
+        
+        if os.name == "nt": 
+            lines[3] = lines[3].replace("UNIX", "WIN")
+        else: # if not windows, change mode to unix/linux
+            lines[3] = lines[3].replace("WIN", "UNIX")
         lines[5] = lines[5].replace("YES", "NO!")
+        
         f.seek(0)
         f.writelines(lines)
 
