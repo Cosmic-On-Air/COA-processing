@@ -22,8 +22,12 @@ jobs:
 
       - name: Write Google API token files
         run: |
-          mkdir -p credentials
-          echo "${{ secrets.GOOGLE_API_TOKEN }}" > credentials/token.json
+          mkdir -p scripts/credentials
+          echo "${{ secrets.GOOGLE_API_TOKEN }}" > scripts/credentials/token.json
+
+      - name: Unzip cari software
+        run: |
+          unzip my_archive.zip -d scripts
           
       - name: Run data processing script
         run: python scripts/coa_automation_script.py
