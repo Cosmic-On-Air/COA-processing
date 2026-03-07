@@ -27,7 +27,7 @@ jobs:
 
       - name: Unzip cari software
         run: |
-          unzip my_archive.zip -d scripts
+          unzip scripts/cari_7Aexe.zip -d scripts
           
       - name: Run data processing script
         run: python scripts/coa_automation_script.py
