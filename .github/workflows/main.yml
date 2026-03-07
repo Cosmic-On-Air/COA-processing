@@ -23,7 +23,7 @@ jobs:
       - name: Write Google API token files
         run: |
           mkdir -p scripts/credentials
-          echo "${{ secrets.GOOGLE_TOKEN_B64 }}" | base64 --decode > scripts/credentials/token.json
+          echo "${{ secrets.GOOGLE_API_TOKEN_B64 }}" | base64 --decode > scripts/credentials/token.json
 
 
       - name: Unzip cari software
