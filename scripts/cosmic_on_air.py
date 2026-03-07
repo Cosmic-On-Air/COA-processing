@@ -16,7 +16,7 @@ Description:
     
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 1 Mar 2026
+Version: 7 Mar 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France

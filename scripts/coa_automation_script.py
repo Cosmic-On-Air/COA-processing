@@ -19,7 +19,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 1 Mar 2026
+Version: 7 Mar 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -489,7 +489,7 @@ def add_summary(creds, sheet_id, submission, data, img_id):
     """
     # formulate list to write to spreadsheet
     values = [[
-        submission[0], # submission timestamp
+        str(submission[0]), # submission timestamp
         submission[1], # submission email
         submission[9], # optional comment
         data['flight_number'], 
@@ -755,11 +755,71 @@ def summary_email(sender, to, date, values, images):
     
     return {"raw": encoded_message}
 
+def no_kml_email(sender, to, indeces, submissions):
+    """
+    Function to create an alert email for submissions without kml files.
+    
+    Parameters
+    ----------
+    sender : string email of sender.
+    
+    to : string email of person to send email to.
+    
+    indeces : list of indeces of submissions without kml files
+    
+    submissions : 2D array of submissions kml files
+    
+    Returns
+    -------
+    raw_msg : Gmail API encoded raw message to send.
+    """
+    
+    message = EmailMessage()
+    
+    message["To"] = to
+    message["From"] = sender
+    message["Subject"] = "Submissions without kml files"
+    
+    if len(indeces) == 0:
+        return False
+        
+    # if there are new submissions, send email summarising submissions
+    body = (
+        "Dear Cosmic On Air Team,"
+        + "\n\nThe following submissions don't have a flight kml file, please upload"
+        + " a flight kml file to the google drive and paste its link in the submissions"
+        + " spreadsheet for each submission affected."
+        + "\n\nHere is the link to the spreadsheet: "
+        + "https://docs.google.com/spreadsheets/d/1CxkzhD3_av7tC_aTwajOspJ4aKAq3HuClFsxBYx6MiQ/"
+        + "\nHere is the link to the folder to upload kml files to: "
+        + "https://drive.google.com/drive/folders/13kjYFl1lvHeuM3sfNMxMNVo9VRUu7-Dv3-oLV5Yn-rrvmVtBZ0ZSwrZO3b3cIfse063h7vQI"
+        + "\n"
+    )
+    
+    # include summary blurb for each submission
+    for idx in indeces:
+        value = submissions[idx]
+        row = f"\nSpreadsheet Row {idx+2}: {value[5]} {value[6]} (Submission {value[0]}, {value[1]}),"
+        
+        body += row
+    
+    body += "\n\nRegards,\nAutomated Cosmic on Air Script"
+    
+    message.set_content(body)
+
+    # encode message
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    
+    return {"raw": encoded_message}
+
 ##################################################################################################
 # Script to process results
 
 # Get google OAuth credentials
 creds = get_creds()
+
+errors = []
+tracebacks = []
 
 # create a temporary directory to handle all files in
 with tempfile.TemporaryDirectory() as tmpdirname:
@@ -775,9 +835,13 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         
         if row[0] == "":
             continue
+        
             
         if row[10] != "y" and row[10] != "Y": # if the row is marked as processed
             new = True
+            row[0] = datetime.strptime(row[0], "%m/%d/%Y %H:%M:%S")
+            row[6] = datetime.strptime(row[6], "%m/%d/%Y").date()
+            
         
     # if there are new submissions process these
     if new:
@@ -789,36 +853,38 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         database_file = os.path.join(database_path, database_file)
         db = ca_db.CoaDatabase(database_path, show_figures=False, show_progress=False)
         
+        no_flight_kml = []
+        
         # process each new response
         for idx, row in enumerate(values):
             # skip already processed responses
             if row[10] == "y" or row[10] == "Y":
                 continue
             
+            if row[8] == "":
+                no_flight_kml.append(idx)
+                print(f"No kml file in submission {row[1]} ({row[0]})")
+                continue
+                
+            
             # TODO: add code to log errors with logging library
             # wrap process in try block to handle logging
             try:
                 # update file cell to 'n' to indicate currently processing
                 update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "n")
-                
-                submission_date = datetime.strptime(row[0], "%m/%d/%Y %H:%M:%S")
-                row[0] = submission_date.strftime("%Y-%m-%d %H:%M:%S")
-                
-                print("Processing response: " + row[1] + " (" + row[0] + ")")
+                                
+                print("Processing response: " + row[1] + " (" + row[0].strftime("%Y-%m-%d %H:%M:%S") + ")")
                 
                 # download raw log and flight file
                 data_file = get_file(creds, extract_drive_id(row[7]), tmpdirname)
-                if row[8] != "": # check if flight file uploaded
-                    flight_file = get_file(creds, extract_drive_id(row[8]), tmpdirname)
-                else: # TODO change this once automatic flight path retrieval is added.
-                    raise FileExistsError("No flight file to process data with.")
+                flight_file = get_file(creds, extract_drive_id(row[8]), tmpdirname)
                 
                 # process/add data to database
                 citizen_id = email_with_name(row[1], row[2])
                 
                 detector_serial = row[4]
                 if detector_serial == "": detector_serial = "UNKNOWN"
-                flight, data = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date)
+                flight, data = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=row[0])
                 
                 # get data_id and new log file of data
                 entry_id, processed_file = flight[0], flight[8]
@@ -850,8 +916,8 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                     print("In debug, response email sending disabled")
                 else:
                     # only email if the submission is recent (within now - max_delay days).
-                    # TODO send logging warning to developer as well
-                    if (datetime.now() - submission_date).days > max_delay:
+                    errors.append(Exception(f"Warning: submission older than 7 days: {row}"))
+                    if (datetime.now() - row[0]).days > max_delay:
                         print("Warning: submission older than 7 days, not sending email")
                     else:
                         gmail_send_message(creds, msg)
@@ -876,13 +942,25 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 os.remove(html_path)
                 os.remove(img_path)
                 
+                # mark cell as completely processed
+                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "Y")
+                
                 print("Finished processing response.")
                 
             # TODO create appropriate logging module error
+            # add errors to tracebacks and errors lists to raise at end
+            # this is done so that an error in one submission doesn't delay
+            # processing other submissions.
             except Exception as e:
                 tb_str = traceback.format_exc()
-                #gmail_send_message(error_email(sender_email, str(e), tb_str, str(row)))
-                raise
+                tracebacks.append(tb_str)
+                errors.append(e)
+                
+        # email team for submissions without flight kml
+        if len(no_flight_kml) > 0:
+            msg = no_kml_email(sender_email, summary_recipients, no_flight_kml, values)
+            gmail_send_message(creds, msg)
+            
     else:
         print("no new submissions")
     
@@ -927,4 +1005,12 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         clear_range(creds, summary_sheet_id, summary_range)
         for row in values:
             delete_file(creds, row[6]) # delete image on drive
+
+if errors:
+    print()
+    for tb in tracebacks:
+        print(tb)
         
+    raise Exception(f"{len(errors)} errors occured: {errors}")
+else:
+    print("Script ended without errors")
