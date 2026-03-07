@@ -90,9 +90,11 @@ sender_email = "Cosmic On Air <cosmiconairuct@gmail.com>"
 
 # email list of COA team to send weekly summaries to
 summary_recipients = "Cosmic On Air UCT <cosmiconairuct@gmail.com>"
-#summary_recipients += ", Cosmic On Air Team <cosmiconair@gmail.com>"
 summary_recipients += ", Aidan Gebbie <gbbaid001@myuct.ac.za>"
-#TODO : add more recipients
+#summary_recipients += ", Cosmic On Air Team <cosmiconair@gmail.com>"
+
+no_kml_recipients = "Cosmic On Air UCT <cosmiconairuct@gmail.com>"
+no_kml_recipients += ", Aidan Gebbie <gbbaid001@myuct.ac.za>"
 
 # path to OAuth credentials
 credentials_path = os.path.join(BASE_DIR, "credentials", "google_credentials.json")
@@ -958,7 +960,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 
         # email team for submissions without flight kml
         if len(no_flight_kml) > 0:
-            msg = no_kml_email(sender_email, summary_recipients, no_flight_kml, values)
+            msg = no_kml_email(sender_email, no_kml_recipients, no_flight_kml, values)
             gmail_send_message(creds, msg)
             
     else:
@@ -993,18 +995,17 @@ with tempfile.TemporaryDirectory() as tmpdirname:
             images.append(get_file(creds, row[6], tmpdirname))
         
         msg = summary_email(sender_email, summary_recipients, date_str, values, images)
-        
-        print("Email created.")
-        
+    
         gmail_send_message(creds, msg)
         
-        print("Email sent.")
         
         # reset weekly summary spreadsheet and delete images
         update_cell(creds, summary_sheet_id, summary_week, str(week))
         clear_range(creds, summary_sheet_id, summary_range)
         for row in values:
             delete_file(creds, row[6]) # delete image on drive
+        
+        print("Weekly summary sent.")
 
 if errors:
     print()
