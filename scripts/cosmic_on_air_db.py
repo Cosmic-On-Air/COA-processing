@@ -332,6 +332,7 @@ class CoaDatabase:
         Parameters
         ----------
         keywords : dictionary of keywords following rules of method 'search'
+            alternatively it can be a string of the data id
         
         exact : only search exact match for keywords (default=False)
         
@@ -340,7 +341,10 @@ class CoaDatabase:
         data : the data dictionary for the first flight found matching the keywords
 
         """
-        items = self.search(keywords, exact)
+        if type(keywords) == str:
+            items = self.get_entry(keywords)
+        else:
+            items = self.search(keywords, exact)
         
         if not items:
             print("Nothing found.")

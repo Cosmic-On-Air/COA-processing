@@ -26,14 +26,19 @@ A. Gebbie, Department of Physics, University of Cape Town, South Africa
 
 version = "v1" # version of script is indicated in processed log files
 cari_version = "CARI-7A v4.2.0"
-cari_exe = "cari7a420.exe"
 logo_path = "images\CosmicOnAir_transparent_color_logo.png"
 wide_logo_path = "images\CosmicOnAir_rounded_horizontal.png"
+
+import os
+if os.name == "nt":   # Windows cari
+    cari_exe = "cari7a420.exe"
+else:                 # Linux / macOS (posix)
+    cari_exe = "cari7a_4.2.0(intel_linux)"
+
 
 ####################################################################################################
 #Imports the modules we need
 #Make sure you have these installed prior to running this code
-import os
 import tempfile
 import shutil
 from datetime import datetime, timedelta
@@ -47,6 +52,7 @@ from matplotlib import pyplot as plt
 import cartopy.crs as ccrs
 import airportsdata
 #from scipy.stats import t, f
+from scipy.signal import butter, filtfilt
 import base64 # to store images
 
 coa_logo = base64.b64encode(open(logo_path, 'rb').read())
@@ -1663,6 +1669,38 @@ def moving_average(arr, w):
 
     return arr
 
+def butter_lowpass_filter(data, cutoff, fs, order=4):
+    """
+    Function to apply a forward-backward butterworth lowpass filter 
+    to a set of data.
+    
+    The cutoff frequency should be about 2x the highest frequency you
+    care about in the data, and less than the frequency of known noise 
+    sources.
+    
+    Parameters
+    ----------
+    data : Data (numpy 1D array) to apply lowpass filter to
+    
+    cutoff : Cutoff frequency (float) for lowpass filter.
+    
+    fs : sampling frequency of data (float)
+        To determine the sampling frequency of data, you can use
+        1.0 / np.mean(np.diff(timestamps))
+        
+    order : Order (integer) of the butterworth filter. The default is 4.
+
+    Returns
+    -------
+    filtered_data : filtered data of same shape as input data.
+
+    """
+    
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='low')
+    return filtfilt(b, a, data)
+
 ####################################################################################################
 def plot_latitude(data, plot_title):
     """
@@ -1851,7 +1889,7 @@ def integrate_radiation(data):
     return np.sum(dt*dose_rate)
 
 ####################################################################################################
-def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
+def plotly_plot(data, lowpass_frequency=1/1200, main=-1, subsample=-1):
     """
     Function to plot a detailed figure summarising the data using various subplots in plotly.
     It also generates custom figure titles, hoverdata and layout using the flight data.
@@ -1878,8 +1916,9 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
     data : data from the detector log file and FlightAware kml file (or list of dictionaries of data 
         from multiple measurements of flight)
     
-    moving_average_width : width of the moving average to denoise data for plotting
-        (default=-1, it determines an appropriate width to average over a roughly 10 minute window)
+    lowpass_frequency : Threshold frequency for Butterworth Low-pass Filter.
+        Note that the threshold frequency should be 2x the highest frequency you
+        care about. (default=1/1200, Interest in lowest period of 10 minutes)
     
     main : main trace to use for reference, altitude and map plots.
         Only useful when plotting multiple data.
@@ -1897,9 +1936,6 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
     # standardize format of input variables
     if type(data) is dict:
         data = [data]
-    
-    if type(moving_average_width) is not list:
-        moving_average_width = [moving_average_width] * len(data)
         
     if type(subsample) is not list:
         subsample = [subsample] * len(data)
@@ -1911,13 +1947,10 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
         
     for i, d in enumerate(data):
         time = np.array([(t - d['takeoff']).total_seconds() for t in d['time']])
-        average_dt = np.average(time[1:] - time[:-1])
+        average_dt = np.mean(np.diff(time))
         if average_dt <= 0:
             average_dt=1e-9
         
-        if moving_average_width[i] == -1:
-            moving_average_width[i] = int(600 / average_dt)# make sure moving average is odd
-            moving_average_width[i] += (moving_average_width[i]%2==0)
         if subsample[i] == -1:
             subsample[i] = int(60 / average_dt)
             if subsample[i] < 1:
@@ -2027,11 +2060,12 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
             yaxis_unit = "μSv/h"
             cpm = cpm * d['scaling_factor']
         
-        # Generate moving average CPM arrays for cleaner plots
-        cpm_average = moving_average(cpm, moving_average_width[i])
+        # Filter data to remove noise above 5 minute period
+        fs = 1.0 / np.mean(np.diff(time*3600)) 
+        cpm_smoothed = butter_lowpass_filter(cpm, lowpass_frequency, fs)
         
         # Generate hoverdata for plots
-        customdata = np.stack((lat, lon, alt, cpm_average, time_string), axis=-1)
+        customdata = np.stack((lat, lon, alt, cpm_smoothed, time_string), axis=-1)
         hovertemplate = (f'detector: {detector_id}' +
                         '<br>Lat: %{customdata[0]:.2f}°' +
                         '<br>Lon: %{customdata[1]:.2f}°' +
@@ -2043,7 +2077,7 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
         else:
             hovertemplate += '<br>Dose Rate: %{customdata[3]:.0f} ' + yaxis_unit
         if 'total-neutron' in data[0]:
-            customdata = np.stack((lat, lon, alt, cpm_average, time_string, reference), axis=-1)
+            customdata = np.stack((lat, lon, alt, cpm_smoothed, time_string, reference), axis=-1)
             hovertemplate += '<br>reference Dose Rate: %{customdata[5]:.2f} ' + yaxis_unit
         hovertemplate += "<extra></extra>"
         
@@ -2051,7 +2085,7 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
         ss_lon = lon[::subsample[i]]
         ss_lat = lat[::subsample[i]]
         ss_alt = alt[::subsample[i]]
-        ss_cpm = cpm_average[::subsample[i]]
+        ss_cpm = cpm_smoothed[::subsample[i]]
         ss_time = time[::subsample[i]]
         
         if 'total-neutron' in data[0]:
@@ -2163,9 +2197,9 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
                 mode="markers",
                 marker=dict(
                     size=10,
-                    color=cpm_average,
+                    color=cpm_smoothed,
                     cmin=0,
-                    cmax=cpm_average.max(),
+                    cmax=cpm_smoothed.max(),
                     colorscale="Inferno_r",
                     colorbar=dict(
                         title=f"Dose Rate ({yaxis_unit})",
@@ -2373,7 +2407,7 @@ def plotly_plot(data, moving_average_width=-1, main=-1, subsample=-1):
     return fig
 
 ####################################################################################################
-def plot_all(data, moving_average_width=-1, subsample=-1):
+def plot_all(data, lowpass_frequency=1/1200, subsample=-1):
     """
     Function to plot all the (possibly different) flights on the world map.
     
@@ -2387,8 +2421,9 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
     data : data from the detector log file and FlightAware kml file (or list of dictionaries of data 
         from multiple measurements of flight)
     
-    moving_average_width : width of the moving average to denoise data for plotting
-        (default=-1, it determines an appropriate width to average over a roughly 10 minute window)
+    lowpass_frequency : Threshold frequency for Butterworth Low-pass Filter.
+        Note that the threshold frequency should be 2x the highest frequency you
+        care about. (default=1/1200, Interest in lowest period of 10 minutes)
     
     main : main trace to use for reference, altitude and map plots.
         Only useful when plotting multiple data.
@@ -2406,10 +2441,7 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
     # standardize format of input variables
     if type(data) is dict:
         data = [data]
-    
-    if type(moving_average_width) is not list:
-        moving_average_width = [moving_average_width] * len(data)
-        
+            
     if type(subsample) is not list:
         subsample = [subsample] * len(data)
         
@@ -2420,13 +2452,10 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
     
     for i, d in enumerate(data):
         time = np.array([(t - d['takeoff']).total_seconds() for t in d['time']])
-        average_dt = np.average(time[1:] - time[:-1])
+        average_dt = np.mean(np.diff(time))
         if average_dt <= 0:
             average_dt=1e-9
         
-        if moving_average_width[i] == -1:
-            moving_average_width[i] = int(600 / average_dt)# make sure moving average is odd
-            moving_average_width[i] += (moving_average_width[i]%2==0)
         if subsample[i] == -1:
             subsample[i] = int(60 / average_dt)
             if subsample[i] < 1:
@@ -2461,7 +2490,8 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
         alt = np.array(d['alt']/1000, dtype=np.float32)
         cpm = np.array(d['cnt_1mn'], dtype=np.float32)
         time_string = [d.strftime("%H:%M:%S") for d in d['time']]
-    
+        time = np.array([(t - d['takeoff']).total_seconds() for t in d['time']])
+            
         # if data contains reference values for radiation, instead plot again radiation level
         if 'total-neutron' in d:
             reference = np.array(d['total-neutron'], dtype=np.float32)
@@ -2470,7 +2500,8 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
         dose_rate = cpm * d['scaling_factor']
         
         # Generate moving average CPM arrays for cleaner plots
-        dose_rate = moving_average(dose_rate, moving_average_width[i])
+        fs = 1.0 / np.mean(np.diff(time)) 
+        dose_rate = butter_lowpass_filter(dose_rate, lowpass_frequency, fs)
         
         # Generate hoverdata for plots
         hovertemplate = (f'detector: {detector_id}' +
@@ -2491,14 +2522,14 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
         ss_lon = lon[::subsample[i]]
         ss_lat = lat[::subsample[i]]
         ss_alt = alt[::subsample[i]]
-        ss_cpm = dose_rate[::subsample[i]]
+        ss_dose_rate = dose_rate[::subsample[i]]
         
         if 'total-neutron' in data[0]:
-            ss_customdata = np.stack((ss_lat, ss_lon, ss_alt, ss_cpm, 
+            ss_customdata = np.stack((ss_lat, ss_lon, ss_alt, ss_dose_rate, 
                                       time_string[::subsample[i]],
                                       ss_reference), axis=-1)
         else:
-            ss_customdata = np.stack((ss_lat, ss_lon, ss_alt, ss_cpm, 
+            ss_customdata = np.stack((ss_lat, ss_lon, ss_alt, ss_dose_rate, 
                                       time_string[::subsample[i]]), axis=-1)
         
         ##############################################################
@@ -2513,7 +2544,7 @@ def plot_all(data, moving_average_width=-1, subsample=-1):
             mode="markers",
             marker=dict(
                 size=5,
-                color=dose_rate,
+                color=ss_dose_rate,
                 cmin=0,
                 cmax=max_dose_rate,
                 colorscale="Inferno_r",
