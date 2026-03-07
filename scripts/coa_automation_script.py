@@ -787,7 +787,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         os.makedirs(database_path)
         database_file = get_file(creds, coa_db_id, database_path) # download file
         database_file = os.path.join(database_path, database_file)
-        db = ca_db.CoaDatabase(database_path, show_figures=False)
+        db = ca_db.CoaDatabase(database_path, show_figures=False, show_progress=False)
         
         # process each new response
         for idx, row in enumerate(values):

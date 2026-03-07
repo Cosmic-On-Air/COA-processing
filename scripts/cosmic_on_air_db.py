@@ -46,7 +46,7 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class CoaDatabase:
-    def __init__(self, path, new_db=False, show_figures=True, include_plotlyjs=True):
+    def __init__(self, path, new_db=False, show_figures=True, include_plotlyjs=True, show_progress=True):
         """
         Constructor for the database object.
 
@@ -77,6 +77,7 @@ class CoaDatabase:
         self.conn = None
         self.show = show_figures
         self.include_plotlyjs = include_plotlyjs
+        self.show_progress= show_progress
 
     def connect(self):
         """
@@ -382,7 +383,7 @@ class CoaDatabase:
             the value it is set to will be the delta time used between measurements if the end timestamp is corrupted.
         """
         
-        data = coa.read_raw_log(log_file, flight_file, detector=detector_id, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta)
+        data = coa.read_raw_log(log_file, flight_file, detector=detector_id, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta, show_progress=self.show_progress)
         
         if self.show:
             coa.plotly_plot(data).show()
@@ -526,7 +527,7 @@ class CoaDatabase:
         detector = "".join(splitup[:-1])
             
         # Reprocess the data
-        data = coa.read_raw_log(raw_log, raw_flight, detector=detector, detector_serial=serial, citizen_id=citizen_id, submission_date=submission_date, parallel=8, time_delta=time_delta, disable_cari_weather=disable_cari_weather)
+        data = coa.read_raw_log(raw_log, raw_flight, detector=detector, detector_serial=serial, citizen_id=citizen_id, submission_date=submission_date, parallel=8, time_delta=time_delta, disable_cari_weather=disable_cari_weather, show_progress=self.show_progress)
         data_id = coa.data_id(data)
         
         # update all file and folder names
@@ -951,7 +952,7 @@ if __name__ == "__main__":
             break
         database_file = input("What is the absolute path to the database .db file?\n")
         
-    db = CoaDatabase(database_path, show_figures=True)
+    db = CoaDatabase(database_path, show_figures=True, show_progress=False)
         
     # CLI for user to interact with database
     while True:

@@ -77,7 +77,7 @@ def data_id(data):
     return data['flight_number'] + " " + data['date'].strftime("%Y-%m-%d") + " " + data['detector'] + serial
 
 ####################################################################################################
-def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, detector_gps=False, parallel=6, time_delta=-1, disable_cari_weather=True):
+def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, detector_gps=False, parallel=6, time_delta=-1, disable_cari_weather=True, show_progress=True):
     """
     Function to read and parse the log file and KML file and sort the data into a variety of categories including:
     detector ID, datetime, count rate  and GPS coordinates.
@@ -243,7 +243,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     # Generate reference data from CARI-7A
     if os.path.isfile(os.path.join(BASE_DIR, "CARI_7A_DVD/CARI-7A.exe")) and parallel > 0:
         # Generate reference CARI-7A radiation values
-        cari_data = gen_cari_data(flight_data, parallel=parallel, disable_weather=disable_cari_weather)
+        cari_data = gen_cari_data(flight_data, parallel=parallel, disable_weather=disable_cari_weather, show_progress=show_progress)
         
         detector_takeoff_idx, detector_landing_idx, R2 = align_time(detector_data, flight_data, cari_data)
         
@@ -1422,7 +1422,7 @@ def align_time(detector_data, flight_data, cari_data):
     return takeoff_idx, landing_idx, max_R2
     
 ####################################################################################################
-def gen_cari_data(location, parallel=4, disable_weather=True):
+def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True):
     """
     Function to generate reference dose rate in μSv/h for the given flight path.
     It interacts with the CARI-7A software to produce resultant data.
@@ -1594,12 +1594,13 @@ def gen_cari_data(location, parallel=4, disable_weather=True):
             # to simplify code and avoid multithreading, serially get progress from first
             # instance only, this can mean it might stay at 100% for a short time after
             # the first instance finishes while others aren't yet done
-            print("\rProgress:  0.0% ", end="")  
+            if show_progress:
+                print("\rProgress:  0.0% ", end="")  
             while any(p.poll() is None for p in instances):
                 line = instances[0].stdout.readline().strip()   # keep updating
                 
                 progress = "".join(char for char in line if char.isdecimal())
-                if progress:
+                if progress and show_progress: #only show 
                     progress = int(progress)/(widths[0]+1) * 50
                     print(f"\rProgress: {progress:4.1f}% ", end="")
                     
@@ -1617,7 +1618,7 @@ def gen_cari_data(location, parallel=4, disable_weather=True):
                     p.wait()
 
         print()
-        print("done")
+        print("CARI-7A data generated")
         
         offset = 0
         for p in range(parallel):
