@@ -95,8 +95,8 @@ summary_recipients += ", Aidan Gebbie <gbbaid001@myuct.ac.za>"
 #TODO : add more recipients
 
 # path to OAuth credentials
-credentials_path = os.path.join(BASE_DIR, "credentials\\google_credentials.json")
-token_path = os.path.join(BASE_DIR, "credentials\\token.json")
+credentials_path = os.path.join(BASE_DIR, "credentials", "google_credentials.json")
+token_path = os.path.join(BASE_DIR, "credentials", "token.json")
 
 def extract_drive_id(url):
     """
@@ -157,8 +157,9 @@ def get_creds():
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first time.
-    print(token_path)
+    print(f"opening {token_path}")
     if os.path.exists(token_path):
+        print("token.json file found")
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
     
     # If there are no (valid) credentials available, let the user log in.
@@ -925,6 +926,4 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         clear_range(creds, summary_sheet_id, summary_range)
         for row in values:
             delete_file(creds, row[6]) # delete image on drive
-
         
-
