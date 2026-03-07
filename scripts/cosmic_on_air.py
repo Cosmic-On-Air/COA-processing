@@ -1579,7 +1579,6 @@ def gen_cari_data(location, parallel=4, disable_weather=True):
                     stdin=subprocess.DEVNULL, # no stdin needed
                     stdout=stdout, # only the first one's stdout is collected
                     stderr=None, # errors are passed to console
-                    creationflags=subprocess.ABOVE_NORMAL_PRIORITY_CLASS,
                     text=True,
                     bufsize=1
                 )
