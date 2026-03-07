@@ -20,5 +20,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write Google API token files
+        run: |
+          mkdir -p credentials
+          echo "${{ secrets.GOOGLE_API_TOKEN }}" > credentials/token.json
+          
       - name: Run data processing script
         run: python scripts/coa_automation_script.py
