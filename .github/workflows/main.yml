@@ -29,6 +29,9 @@ jobs:
       - name: Unzip cari software
         run: |
           unzip scripts/cari_7Aexe.zip -d scripts
+          C:\Users\aidan\OneDrive - University of Cape Town\Cosmic On Air\cari_7Aexe.zip\CARI_7A_DVD
+          chmod +x /scripts/CARI_7A_DVD/cari7a_4.2.0(intel_linux)
+
           
       - name: Run data processing script
         run: python scripts/coa_automation_script.py
