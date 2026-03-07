@@ -1,0 +1,24 @@
+name: Data Processing Workflow
+
+on:
+  workflow_dispatch:   # allows manual trigger
+  schedule:
+    - cron: "0 2 * * *"   # every day at 2 AM UTC
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.5'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run data processing script
+        run: python scripts/coa_automation_script.py
