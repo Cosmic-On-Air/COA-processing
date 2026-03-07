@@ -916,8 +916,8 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                     print("In debug, response email sending disabled")
                 else:
                     # only email if the submission is recent (within now - max_delay days).
-                    errors.append(Exception(f"Warning: submission older than 7 days: {row}"))
                     if (datetime.now() - row[0]).days > max_delay:
+                        errors.append(Exception(f"Warning: submission older than 7 days: {row}"))
                         print("Warning: submission older than 7 days, not sending email")
                     else:
                         gmail_send_message(creds, msg)
