@@ -56,6 +56,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 ################################################################################################
 # define program constants
 
@@ -93,8 +95,8 @@ summary_recipients += ", Aidan Gebbie <gbbaid001@myuct.ac.za>"
 #TODO : add more recipients
 
 # path to OAuth credentials
-credentials_path = os.path.join(os.getcwd(), "credentials\\google_credentials.json")
-token_path = os.path.join(os.getcwd(), "credentials\\token.json")
+credentials_path = os.path.join(BASE_DIR, "credentials\\google_credentials.json")
+token_path = os.path.join(BASE_DIR, "credentials\\token.json")
 
 def extract_drive_id(url):
     """

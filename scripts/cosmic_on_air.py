@@ -26,8 +26,6 @@ A. Gebbie, Department of Physics, University of Cape Town, South Africa
 
 version = "v1" # version of script is indicated in processed log files
 cari_version = "CARI-7A v4.2.0"
-logo_path = "images\CosmicOnAir_transparent_color_logo.png"
-wide_logo_path = "images\CosmicOnAir_rounded_horizontal.png"
 
 import os
 if os.name == "nt":   # Windows cari
@@ -35,6 +33,11 @@ if os.name == "nt":   # Windows cari
 else:                 # Linux / macOS (posix)
     cari_exe = "cari7a_4.2.0(intel_linux)"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+logo_path = os.path.join(BASE_DIR, "images", "CosmicOnAir_transparent_color_logo.png")
+wide_logo_path = os.path.join(BASE_DIR, "images", "CosmicOnAir_rounded_horizontal.png")
 
 ####################################################################################################
 #Imports the modules we need
@@ -238,7 +241,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     #############################################################
     # Generate reference data from CARI-7A
-    if os.path.isfile(os.getcwd() + "/CARI_7A_DVD/CARI-7A.exe") and parallel > 0:
+    if os.path.isfile(os.path.join(BASE_DIR, "CARI_7A_DVD/CARI-7A.exe")) and parallel > 0:
         # Generate reference CARI-7A radiation values
         cari_data = gen_cari_data(flight_data, parallel=parallel, disable_weather=disable_cari_weather)
         
@@ -1507,7 +1510,7 @@ def gen_cari_data(location, parallel=4, disable_weather=True):
     widths[-1] = size - sum(widths[:-1])
     
     # Path to the original folder
-    src = os.path.join(os.getcwd(), 'CARI_7A_DVD')
+    src = os.path.join(BASE_DIR, 'CARI_7A_DVD')
 
     # change CARI-7A settings to work in non-menus mode
     ini_file = os.path.join(src, 'CARI.INI')

@@ -43,6 +43,8 @@ from iso3166 import countries # to retrieve country name since airportsdata only
 import plotly.io as pio
 from datetime import datetime
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 class CoaDatabase:
     def __init__(self, path, new_db=False, show_figures=True, include_plotlyjs=True):
         """
@@ -941,7 +943,7 @@ class CoaDatabase:
 
 if __name__ == "__main__":
     # Find the location of the database; first check the current working directry
-    database_file = os.path.join(os.getcwd(), "data_archive", "coa.db")
+    database_file = os.path.join(BASE_DIR, "data_archive", "coa.db")
     while True:
         if os.path.isfile(database_file):
             print("Found database at", database_file)
