@@ -29,7 +29,7 @@ jobs:
       - name: Unzip cari software
         run: |
           unzip scripts/cari_7Aexe.zip -d scripts
-          chmod +x /scripts/CARI_7A_DVD/cari7a_4.2.0(intel_linux)
+          chmod +x /scripts/CARI_7A_DVD/cari7a_4.2.0\(intel_linux\)
 
           
       - name: Run data processing script
