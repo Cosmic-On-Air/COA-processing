@@ -157,8 +157,8 @@ def get_creds():
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first time.
+    print(token_path)
     if os.path.exists(token_path):
-        print(token_path)
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
     
     # If there are no (valid) credentials available, let the user log in.
@@ -927,3 +927,4 @@ with tempfile.TemporaryDirectory() as tmpdirname:
             delete_file(creds, row[6]) # delete image on drive
 
         
+
