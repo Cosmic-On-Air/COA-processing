@@ -1,0 +1,13 @@
+airportsdata==20250909
+cartopy==0.25.0
+google_api_python_client==2.187.0
+google_auth_oauthlib==1.2.3
+iso3166==2.1.1
+matplotlib==3.10.8
+numpy==2.4.2
+plotly==6.5.0
+protobuf==7.34.0
+pykml==0.2.0
+pyopensky==2.16
+Requests==2.32.5
+scipy==1.17.1
