@@ -2,7 +2,7 @@ name: Data Processing Workflow
 
 on:
   schedule:
-    - cron: "42 4 * * *"   # every day at 4:42 AM UTC
+    - cron: "0 5 * * *"   # every day at 7 AM UTC+2
   workflow_dispatch:   # allows manual trigger
 
 jobs:
