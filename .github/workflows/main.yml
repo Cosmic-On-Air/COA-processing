@@ -2,7 +2,7 @@ name: Data Processing Workflow
 
 on:
   schedule:
-    - cron: "15 */1 * * *"   # every hour
+    - cron: "45 */6 * * *"   # every 6 hours to guarentee at least 1 run per day
   workflow_dispatch:   # allows manual trigger
 
 jobs:
