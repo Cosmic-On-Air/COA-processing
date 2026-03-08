@@ -1,36 +1,51 @@
 name: Data Processing Workflow
 
 on:
-  workflow_dispatch:   # allows manual trigger
   schedule:
-    - cron: "20 4 * * *"   # every day at 4:20 AM UTC
+    - cron: "32 4 * * *"   # every day at 4:32 AM UTC
+  workflow_dispatch:   # allows manual trigger
 
 jobs:
   process-data:
     runs-on: ubuntu-latest
     steps:
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ============================================================
+      # 2. Python install
+      # ============================================================
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13.5'
 
+      # ============================================================
+      # 3. Install python dependencies
+      # ============================================================
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Write Google API token files
-        run: |
-          mkdir -p scripts/credentials
-          echo "${{ secrets.GOOGLE_API_TOKEN_B64 }}" | base64 --decode > scripts/credentials/token.json
-
-
+      # ============================================================
+      # 3.1. Install cari dependency
       - name: Unzip cari software
         run: |
           unzip scripts/cari_7Aexe.zip -d scripts
           chmod +x scripts/CARI_7A_DVD/cari7a_4.2.0\(intel_linux\)
 
-          
+      # ============================================================
+      # 4. Transfer Google API token
+      # ============================================================
+      - name: Write Google API token files
+        run: |
+          mkdir -p scripts/credentials
+          echo "${{ secrets.GOOGLE_API_TOKEN_B64 }}" | base64 --decode > scripts/credentials/token.json
+
+      # ============================================================
+      # Run submission processing script
+      # ============================================================
       - name: Run data processing script
         run: python scripts/coa_automation_script.py
