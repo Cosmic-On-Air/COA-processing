@@ -3,7 +3,7 @@ name: Data Processing Workflow
 on:
   workflow_dispatch:   # allows manual trigger
   schedule:
-    - cron: "15 8 * * *"   # every day at 2 AM UTC
+    - cron: "20 4 * * *"   # every day at 4:20 AM UTC
 
 jobs:
   process-data:
