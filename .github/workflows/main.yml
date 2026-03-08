@@ -1,9 +1,9 @@
 name: Data Processing Workflow
 
 on:
-  workflow_dispatch:   # allows manual trigger
+  workflow_dispatch   # allows manual trigger
   schedule:
-    - cron: "0 2 * * *"   # every day at 2 AM UTC
+    - cron: "15 8 * * *"   # every day at 2 AM UTC
 
 jobs:
   process-data:
