@@ -19,7 +19,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 7 Mar 2026
+Version: 18 Mar 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -78,7 +78,8 @@ max_delay = 7
 coa_db_id = "1BZdB4rI0tTv-XQso3f_l-g8tKOecjjFe"
 db_folder_id = "1SzYj5EtJFghee3Tt2Ct7MX6N0Roc31bs"
 form_sheet_id = "1CxkzhD3_av7tC_aTwajOspJ4aKAq3HuClFsxBYx6MiQ"
-submission_range = "Form responses 1!A2:K"
+submission_range = "Form responses 1!A2:L"
+processed_idx="L"
 # cell updating is done with f"Form responses 1!I{idx+2}"
 summary_sheet_id = "1IMXxyc_c7Bys8t5n10XhM1ewyuzAL2FIAwgeX5zjvA0"
 summary_folder_id = "1XpAHcxDHfVQzoAyi2q_XzC8NUqrjAXs4"
@@ -631,19 +632,20 @@ def result_email(sender, submission, image_path, html_path):
     body_msg = f"""
     <p>Hello {name},</p>
 
-    <p>We have now completed processing your submission to the Cosmic On Air Google Form.</p>
+    <p>Thank you for your data submission to Cosmic On Air.</p>
 
-    <p>Below is an embedded image summarising the radiation dose data collected during your flight.  
-    Additionally, an interactive HTML file of your results is provided. 
-    You can open the html file in your preferred web browser. A desktop browser is recommended 
-    for optimal scaling and reliability, as mobile browsers may not fully support interactive features.
-    The file features an interactive world map and graphs.</p>
-
-    <p>Please note: this is an automated email.<br> 
-    If you included comments in your form submission, our team will review and respond within 14 days.</p>
-
-    <p>Kind regards,<br>
-    Cosmic On Air Team</p>
+    <p>Attached is an analysis of the data from your flight. (The HTML file can be opened in any 
+    web browser; however we recommend using a desktop browser for optimal scaling and reliability, 
+    since mobile browsers may not fully support interactive features.) The green lines are the 
+    estimated dose rates from the CARI-7A code, and your data are plotted in yellow. The world
+    map is interactive.</p>
+    
+    <p>If you have queries, please reply to this email.</p>
+    
+    <p>The Cosmic On Air team</p>
+    
+    <p>This is an automated email.<br>
+    If you included comments in your submission then we will respond soon.</p>
     """
     # Root message
     message = MIMEMultipart('related')
@@ -823,6 +825,8 @@ creds = get_creds()
 errors = []
 tracebacks = []
 
+Y_index = ord(processed_idx)-ord("A")
+
 # create a temporary directory to handle all files in
 with tempfile.TemporaryDirectory() as tmpdirname:
     # fetch latest list of values in submission spreadsheet
@@ -832,14 +836,14 @@ with tempfile.TemporaryDirectory() as tmpdirname:
     new = False
     for row in values:
         # google sheets doesn't guarentee full A:I range, it trims off empty cells
-        while len(row) < 11:
+        while len(row) < Y_index+1:
             row.append("")
         
         if row[0] == "":
             continue
         
             
-        if row[10] != "y" and row[10] != "Y": # if the row is marked as processed
+        if row[Y_index] != "y" and row[Y_index] != "Y": # if the row is marked as processed
             new = True
             row[0] = datetime.strptime(row[0], "%m/%d/%Y %H:%M:%S")
             row[6] = datetime.strptime(row[6], "%m/%d/%Y").date()
@@ -860,7 +864,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
         # process each new response
         for idx, row in enumerate(values):
             # skip already processed responses
-            if row[10] == "y" or row[10] == "Y":
+            if row[Y_index] == "y" or row[Y_index] == "Y":
                 continue
             
             if row[8] == "":
@@ -873,7 +877,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
             # wrap process in try block to handle logging
             try:
                 # update file cell to 'n' to indicate currently processing
-                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "n")
+                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "n")
                                 
                 print(f"\nProcessing response: {row[1]} ({row[0]})")
                 
@@ -914,7 +918,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 # Note that the submission is labelled as processed before any other API interactions
                 # to avoid automatic reprocessing of submission incase of an error 
                 # (if an error occured it should definitely be processed manuaully/supervised)
-                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "y")
+                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "y")
                 
                 # email the citizen
                 if debug: # don't email in debug mode
@@ -949,7 +953,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 os.remove(img_path)
                 
                 # mark cell as completely processed
-                update_cell(creds, form_sheet_id, f"Form responses 1!K{idx+2}", "Y")
+                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "Y")
                 
                 print("Finished processing response.")
                 
