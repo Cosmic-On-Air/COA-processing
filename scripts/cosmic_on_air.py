@@ -137,7 +137,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     data['citizen_id'] = citizen_id
     data['detector'] = detector
-    data['detector_serial'] = detector_serial.replace(" ", "_").replace("\\", "_").replace("/", "_")
+    data['detector_serial'] = detector_serial.replace(" ", "_").replace("\\", "_").replace("/", "_")[:30]
     
     if submission_date == None:
         data['submission_date'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1938,54 +1938,6 @@ def plotly_plot(data, lowpass_frequency=1/1200, main=-1, subsample=-1):
         # unravel longitude for certain graphs
         unravelled_lon = unravel_lon(ss_lon)
         
-        ##############################################################
-        # Plot data
-        # Dose Rate vs Latitude
-        fig.add_trace(go.Scatter(
-            x=ss_lat,
-            y=ss_cpm,
-            mode='lines',
-            line=dict(color="orange"),
-            customdata=ss_customdata,
-            hovertemplate=hovertemplate,
-            name=detector_id,
-            legendgroup=detector_id,
-            legendrank=1
-        ), row=1, col=1)
-        # Dose Rate vs Longitude
-        fig.add_trace(go.Scatter(
-            x=unravelled_lon,
-            y=ss_cpm,
-            mode='lines',
-            line=dict(color="orange"),
-            customdata=ss_customdata,
-            hovertemplate=hovertemplate,
-            legendgroup=detector_id,
-            showlegend=False
-        ), row=1, col=3)
-        # Dose Rate vs Altitude
-        fig.add_trace(go.Scatter(
-            x=ss_alt,
-            y=ss_cpm,
-            mode='lines',
-            line=dict(color="orange"),
-            customdata=ss_customdata,
-            hovertemplate=hovertemplate,
-            legendgroup=detector_id,
-            showlegend=False
-        ), row=2, col=1)
-        # Dose Rate vs Time
-        fig.add_trace(go.Scatter(
-            x=ss_time,
-            y=ss_cpm,
-            mode='lines',
-            line=dict(color="orange"),
-            customdata=ss_customdata,
-            hovertemplate=hovertemplate,
-            legendgroup=detector_id,
-            showlegend=False
-        ), row=2, col=3)
-            
         #################################################################
         # If this is the main data, use it to plot altitude, CARI and worldmap data
         if i == main:
@@ -2098,6 +2050,54 @@ def plotly_plot(data, lowpass_frequency=1/1200, main=-1, subsample=-1):
                     legendgroup="C",
                     showlegend=False
                 ), row=2, col=3)
+        
+        ##############################################################
+        # Plot data
+        # Dose Rate vs Latitude
+        fig.add_trace(go.Scatter(
+            x=ss_lat,
+            y=ss_cpm,
+            mode='lines',
+            line=dict(color="orange"),
+            customdata=ss_customdata,
+            hovertemplate=hovertemplate,
+            name=detector_id,
+            legendgroup=detector_id,
+            legendrank=1
+        ), row=1, col=1)
+        # Dose Rate vs Longitude
+        fig.add_trace(go.Scatter(
+            x=unravelled_lon,
+            y=ss_cpm,
+            mode='lines',
+            line=dict(color="orange"),
+            customdata=ss_customdata,
+            hovertemplate=hovertemplate,
+            legendgroup=detector_id,
+            showlegend=False
+        ), row=1, col=3)
+        # Dose Rate vs Altitude
+        fig.add_trace(go.Scatter(
+            x=ss_alt,
+            y=ss_cpm,
+            mode='lines',
+            line=dict(color="orange"),
+            customdata=ss_customdata,
+            hovertemplate=hovertemplate,
+            legendgroup=detector_id,
+            showlegend=False
+        ), row=2, col=1)
+        # Dose Rate vs Time
+        fig.add_trace(go.Scatter(
+            x=ss_time,
+            y=ss_cpm,
+            mode='lines',
+            line=dict(color="orange"),
+            customdata=ss_customdata,
+            hovertemplate=hovertemplate,
+            legendgroup=detector_id,
+            showlegend=False
+        ), row=2, col=3)
     
     #######################################################################
     # Add markers for the origin and destination airport
