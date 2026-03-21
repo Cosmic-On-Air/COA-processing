@@ -16,7 +16,7 @@ Description:
     
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 7 Mar 2026
+Version: 21 Mar 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -91,7 +91,11 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     flight_filename : path and name of the ADS-B flight data file to open
         (if not provided, program will attempt to use detector gps data regardless to try recover data)
-        
+    
+    detector : string identifier of the type of detector used, default="UNKNOWN".
+
+    detector_serial : string identifier of the detector serial number, default="UNKNOWN".   
+    
     citizen_id : string identifier of the individual who collected the data.
     
     detector_gps : Boolean value to select detector GPS instead of interpolating flightAware data
@@ -101,9 +105,10 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     time_delta : default=-1. If greater than 0, the software will attempt to recover corrupted timestamps in data
         the value it is set to will be the delta time used between measurements if the end timestamp is corrupted
         
-    
     disable_cari_weather : boolean value to disable the Geomagnetic storm and Furbush effect
         correction in the CARI-7A software
+        
+    show_progress : default=True. Boolean value to show percent progress in calculating cari data.
 
     Returns
     -------
@@ -132,7 +137,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     data['citizen_id'] = citizen_id
     data['detector'] = detector
-    data['detector_serial'] = detector_serial
+    data['detector_serial'] = detector_serial.replace(" ", "_")
     
     if submission_date == None:
         data['submission_date'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
