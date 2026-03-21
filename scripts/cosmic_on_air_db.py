@@ -970,7 +970,7 @@ if __name__ == "__main__":
             break
         database_file = input("What is the absolute path to the database .db file?\n")
         
-    db = CoaDatabase(database_path, show_figures=True, show_progress=False)
+    db = CoaDatabase(database_path, show_figures=True, show_progress=True)
         
     # CLI for user to interact with database
     while True:

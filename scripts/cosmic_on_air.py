@@ -645,17 +645,32 @@ def read_flight_kml(kml_filename):
     # Extract the origin, destination, flight, and date
     kml_name = str(doc.Document.name)
     
-    origin_index = kml_name.rfind("-") - 4
-    dest_index = kml_name.rfind(")") - 4
-    date_index = kml_name.rfind("(") - 11
-    flight_index = kml_name[:date_index-1].rfind(" ") + 1
+    space1_idx = kml_name.find(" ")
     
-    data['origin ICAO'] = kml_name[origin_index:origin_index+4]
-    data['destination ICAO'] = kml_name[dest_index:dest_index+4]
+    name_idx = kml_name.find(" ", space1_idx+1) + 1
+    date_idx = kml_name.find(" ", name_idx) + 1
+    date_end_idx = kml_name.find(" ", date_idx)
+    
+    origin_idx = kml_name.rfind("-") - 4
+    dest_idx = kml_name.rfind(")") - 4
+    
+    # try determine date format in kml file (several known versions)
+    formats = ["%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y"] # DD-MMM-YYYY, YYYY-MM-DD, DD-MM-YYYY
+    date_str = kml_name[date_idx:date_end_idx]
+    for string in formats:
+        try:
+            data['date'] = datetime.strptime(date_str, string).date()
+            break
+        except ValueError:
+            continue
+    else:
+        raise ValueError(f"Unrecognized date format: {date_str}")
+    
+    data['flight_number'] = kml_name[name_idx:date_idx-1]
+    data['origin ICAO'] = kml_name[origin_idx:origin_idx+4]
+    data['destination ICAO'] = kml_name[dest_idx:dest_idx+4]
     data['origin'] = airports.get(data['origin ICAO'])['city']
     data['destination'] = airports.get(data['destination ICAO'])['city']
-    data['date'] = datetime.strptime(kml_name[date_index:date_index+10], "%d-%m-%Y").date()
-    data['flight_number'] = kml_name[flight_index:date_index-1]
     
     # Extract flight time data
     for e in doc.Document.Placemark[2].findall(".//{http://www.opengis.net/kml/2.2}when"):
@@ -949,37 +964,6 @@ def write_newlog(data, new_file):
                                           f"{(data['cari_total'][i] - data['total-neutron'][i]):.4e}"])
                 
             f.write(line + "\n")
-            
-####################################################################################################
-def find_processed(log_filename):
-    """
-    Function to check if there is an existing processed log file for the given data.
-    It checks if a file following the format Processed_data_... where ... is all the numbers
-    in the original filename.
-    
-    If it finds an existing file, it returns the data, otherwise it returns None.
-    
-    Parameters
-    ----------
-    
-    log_filename : name of the raw log file to find a processed file of
-    
-    Returns
-    -------
-    
-    data : the data of the processed file, or None if it couldn't find any
-    """
-    
-    file_path = os.path.dirname(log_filename)
-    file_name, ext = os.path.splitext(os.path.basename(log_filename))
-    file_name = "".join(char for char in file_name if char.isdecimal()) #extract log number
-    processed_file_name = f"{file_path}{os.sep}Processed_data_{file_name}.log"
-    
-    if os.path.isfile(processed_file_name):
-        print("found existing processed data .log file")
-        return read_processed_log(processed_file_name) 
-    else:
-        return None
 
 ####################################################################################################
 def lat_lon_dist(lat1, lon1, lat2, lon2, radius=6371):
@@ -1012,6 +996,7 @@ def lat_lon_dist(lat1, lon1, lat2, lon2, radius=6371):
     c = 2 * np.atan2(np.sqrt(a), np.sqrt(1-a))
     return c * radius
 
+###################################################################################################
 def unravel_lon(lon):
     """
     Function to unravel longitude (prevent jumping over 180 to -180 line).
@@ -1034,6 +1019,7 @@ def unravel_lon(lon):
             
     return unravelled_lon
 
+####################################################################################################
 def ravel_lon(lon):
     """
     Function to ravel up longitude (force range of (-180; 180]).
@@ -1652,32 +1638,6 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
         
     return cari_data
 
-####################################################################################################
-def moving_average(arr, w):
-    """
-    Function to apply a moving average to a list of data
-    Endpoint data is not modified by the moving average
-    
-    Parameters
-    ----------
-    arr : the list of data (integer of float) to apply a moving average to
-    
-    w : the width of the moving average. This width must be an odd number
-    
-    Returns
-    -------
-    arr : the list of data after the moving average is applied
-    """
-    if w % 2 == 0:
-        raise ValueError("width must be odd")
-
-    arr = np.array(arr)
-
-    # Convolve with a uniform window
-    arr[w//2:-w//2+1] = np.convolve(arr, np.ones(w)/w, mode='valid')
-
-    return arr
-
 def butter_lowpass_filter(data, cutoff, fs, order=4):
     """
     Function to apply a forward-backward butterworth lowpass filter 
@@ -1710,141 +1670,6 @@ def butter_lowpass_filter(data, cutoff, fs, order=4):
     b, a = butter(order, normal_cutoff, btype='low')
     return filtfilt(b, a, data)
 
-####################################################################################################
-def plot_latitude(data, plot_title):
-    """
-    Function to plot the Counts per minute vs Latitude graph with matplotlib
-    
-    Parameters
-    ----------
-    
-    data : data from detector .log file
-    
-    plot_title : String for the title of the plot
-    """
-
-    lat = data['lat']
-
-    # take a moving average of the data to smoothen the graph out
-    cpm = data['cnt_1mn']
-    cpm = moving_average(cpm, 101)
-
-    #Plots the figure and labels the axes
-    plt.figure()
-    plt.scatter(lat, cpm, marker = '.', label="CPS-1min", color = '#FF7518')
-    plt.xlabel('Latitude (Degrees)', fontsize=14)
-    plt.ylabel('Counts per Minute', fontsize=14)
-    #Titles the plot - you can change this to match your data
-    plt.title(plot_title, fontsize=14)
-
-    #Ensures that take-off is always plotted on the left and landing on the right
-    if lat[0] > lat[-1]:
-        plt.gca().invert_xaxis()
-
-####################################################################################################
-def plot_longitude(data, plot_title):
-    """
-    Function to plot the Counts per minute vs Longitude graph with matplotlib
-    
-    Parameters
-    ----------
-    
-    data : data from detector .log file
-    
-    plot_title : String for the title of the plot
-    """
-
-    lon = data['lon']
-    
-    #Plots the figure and labels the axes
-    plt.figure()
-
-    # take a moving average of the data to smoothen the graph out
-    cpm = data['cnt_1mn']
-    cpm = moving_average(cpm, 101)
-
-    plt.scatter(lon, cpm, marker = '.', label="CPS-1min", color = '#FF7518')
-    plt.xlabel('Longitude (Degrees)', fontsize=14)
-    plt.ylabel('Counts per Minute', fontsize=14)
-    #Titles the plot - you can change this to match your data
-    plt.title(plot_title, fontsize=14)
-
-    #Ensures that take-off is always plotted on the left and landing on the right
-    if lon[0] > lon[-1]:
-        plt.gca().invert_xaxis()
-
-####################################################################################################
-def plot_altitude(data, plot_title):
-    """
-    Function to plot the Counts per minute vs Altitude graph with matplotlib
-    
-    Parameters
-    ----------
-    
-    data : data from detector .log file
-    
-    plot_title : String for the title of the plot
-    """
-
-    alt = data['alt']/1000    
-
-    #Plots the figure and labels the axes
-    plt.figure()
-
-    # take a moving average of the data to smoothen the graph out
-    cpm = data['cnt_1mn']
-    cpm = moving_average(cpm, 3)
-
-    plt.scatter(alt, cpm, marker = '.',label="CPS-1min", color = '#FF7518')
-    plt.xlabel('Altitude (km)', fontsize=14)
-    plt.ylabel('Counts per Minute', fontsize=14)
-    #Titles the plot - you can change this to match your data
-    plt.title(plot_title, fontsize=14)
-
-####################################################################################################
-def plot_world(data, plot_title):
-    """
-    Function to plot the Counts per minute as coloured points on a worldmap with matplotlib
-    
-    Parameters
-    ----------
-    
-    data : data from detector .log file
-    
-    plot_title : String for the title of the plot
-    """
-
-    #Plots the world map
-    fig = plt.figure(figsize=(25, 15))
-    ax1 = fig.add_subplot(111,projection=ccrs.PlateCarree())
-    ax1.stock_img()
-
-    #Ensures that any radiation > 95% of the max radiation does not skew the colour map
-    d_tmp = data['cnt_1mn']
-    threshold = max(d_tmp) * 0.95
-    d_tmp = [d if d < threshold else threshold for d in d_tmp]
-
-    # take a moving average of the data to smoothen the graph out
-    d_tmp = moving_average(d_tmp, 5)
-
-    #Plots the flight path
-    p1=plt.scatter(data['lon'], data['lat'], c=d_tmp, cmap='inferno_r', vmin = 0, vmax = threshold)
-
-    #Ensures that the whole world map is plotted
-    #These limits can be changed if you would like to zoom into the flight path
-    plt.xlim(-180, 180)
-    plt.ylim(-90,90)
-    #Titles the plot
-    plt.title(plot_title, fontsize = 24)
-
-    #Creates a legend for the colour-map
-    cbar = plt.colorbar(p1, ax=ax1, orientation='vertical')
-    cbar.set_label('Dose Rate (CPM)', labelpad=30, fontsize=22)
-    cbar_ticks = [0, threshold  * 0.2, threshold  * 0.4, threshold  * 0.6, threshold  * 0.8, threshold]
-    cbar.set_ticks(cbar_ticks)
-    cbar.set_ticklabels([f'{tick:.1f}' for tick in cbar_ticks])
-    cbar.ax.tick_params(labelsize=20)
-    
 ####################################################################################################
 def integrate_distance(data):
     """
@@ -2647,3 +2472,198 @@ def plot_all(data, lowpass_frequency=1/1200, subsample=-1):
     ))
     
     return fig
+
+###################################################################################################
+# Legacy functions
+###################################################################################################
+def find_processed(log_filename):
+    """
+    Function to check if there is an existing processed log file for the given data.
+    It checks if a file following the format Processed_data_... where ... is all the numbers
+    in the original filename.
+    
+    If it finds an existing file, it returns the data, otherwise it returns None.
+    
+    Parameters
+    ----------
+    
+    log_filename : name of the raw log file to find a processed file of
+    
+    Returns
+    -------
+    
+    data : the data of the processed file, or None if it couldn't find any
+    """
+    
+    file_path = os.path.dirname(log_filename)
+    file_name, ext = os.path.splitext(os.path.basename(log_filename))
+    file_name = "".join(char for char in file_name if char.isdecimal()) #extract log number
+    processed_file_name = f"{file_path}{os.sep}Processed_data_{file_name}.log"
+    
+    if os.path.isfile(processed_file_name):
+        print("found existing processed data .log file")
+        return read_processed_log(processed_file_name) 
+    else:
+        return None
+    
+####################################################################################################
+def moving_average(arr, w):
+    """
+    Function to apply a moving average to a list of data
+    Endpoint data is not modified by the moving average
+    
+    Parameters
+    ----------
+    arr : the list of data (integer of float) to apply a moving average to
+    
+    w : the width of the moving average. This width must be an odd number
+    
+    Returns
+    -------
+    arr : the list of data after the moving average is applied
+    """
+    if w % 2 == 0:
+        raise ValueError("width must be odd")
+
+    arr = np.array(arr)
+
+    # Convolve with a uniform window
+    arr[w//2:-w//2+1] = np.convolve(arr, np.ones(w)/w, mode='valid')
+
+    return arr
+
+####################################################################################################
+def plot_latitude(data, plot_title):
+    """
+    Function to plot the Counts per minute vs Latitude graph with matplotlib
+    
+    Parameters
+    ----------
+    
+    data : data from detector .log file
+    
+    plot_title : String for the title of the plot
+    """
+
+    lat = data['lat']
+
+    # take a moving average of the data to smoothen the graph out
+    cpm = data['cnt_1mn']
+    cpm = moving_average(cpm, 101)
+
+    #Plots the figure and labels the axes
+    plt.figure()
+    plt.scatter(lat, cpm, marker = '.', label="CPS-1min", color = '#FF7518')
+    plt.xlabel('Latitude (Degrees)', fontsize=14)
+    plt.ylabel('Counts per Minute', fontsize=14)
+    #Titles the plot - you can change this to match your data
+    plt.title(plot_title, fontsize=14)
+
+    #Ensures that take-off is always plotted on the left and landing on the right
+    if lat[0] > lat[-1]:
+        plt.gca().invert_xaxis()
+
+####################################################################################################
+def plot_longitude(data, plot_title):
+    """
+    Function to plot the Counts per minute vs Longitude graph with matplotlib
+    
+    Parameters
+    ----------
+    
+    data : data from detector .log file
+    
+    plot_title : String for the title of the plot
+    """
+
+    lon = data['lon']
+    
+    #Plots the figure and labels the axes
+    plt.figure()
+
+    # take a moving average of the data to smoothen the graph out
+    cpm = data['cnt_1mn']
+    cpm = moving_average(cpm, 101)
+
+    plt.scatter(lon, cpm, marker = '.', label="CPS-1min", color = '#FF7518')
+    plt.xlabel('Longitude (Degrees)', fontsize=14)
+    plt.ylabel('Counts per Minute', fontsize=14)
+    #Titles the plot - you can change this to match your data
+    plt.title(plot_title, fontsize=14)
+
+    #Ensures that take-off is always plotted on the left and landing on the right
+    if lon[0] > lon[-1]:
+        plt.gca().invert_xaxis()
+
+####################################################################################################
+def plot_altitude(data, plot_title):
+    """
+    Function to plot the Counts per minute vs Altitude graph with matplotlib
+    
+    Parameters
+    ----------
+    
+    data : data from detector .log file
+    
+    plot_title : String for the title of the plot
+    """
+
+    alt = data['alt']/1000    
+
+    #Plots the figure and labels the axes
+    plt.figure()
+
+    # take a moving average of the data to smoothen the graph out
+    cpm = data['cnt_1mn']
+    cpm = moving_average(cpm, 3)
+
+    plt.scatter(alt, cpm, marker = '.',label="CPS-1min", color = '#FF7518')
+    plt.xlabel('Altitude (km)', fontsize=14)
+    plt.ylabel('Counts per Minute', fontsize=14)
+    #Titles the plot - you can change this to match your data
+    plt.title(plot_title, fontsize=14)
+
+####################################################################################################
+def plot_world(data, plot_title):
+    """
+    Function to plot the Counts per minute as coloured points on a worldmap with matplotlib
+    
+    Parameters
+    ----------
+    
+    data : data from detector .log file
+    
+    plot_title : String for the title of the plot
+    """
+
+    #Plots the world map
+    fig = plt.figure(figsize=(25, 15))
+    ax1 = fig.add_subplot(111,projection=ccrs.PlateCarree())
+    ax1.stock_img()
+
+    #Ensures that any radiation > 95% of the max radiation does not skew the colour map
+    d_tmp = data['cnt_1mn']
+    threshold = max(d_tmp) * 0.95
+    d_tmp = [d if d < threshold else threshold for d in d_tmp]
+
+    # take a moving average of the data to smoothen the graph out
+    d_tmp = moving_average(d_tmp, 5)
+
+    #Plots the flight path
+    p1=plt.scatter(data['lon'], data['lat'], c=d_tmp, cmap='inferno_r', vmin = 0, vmax = threshold)
+
+    #Ensures that the whole world map is plotted
+    #These limits can be changed if you would like to zoom into the flight path
+    plt.xlim(-180, 180)
+    plt.ylim(-90,90)
+    #Titles the plot
+    plt.title(plot_title, fontsize = 24)
+
+    #Creates a legend for the colour-map
+    cbar = plt.colorbar(p1, ax=ax1, orientation='vertical')
+    cbar.set_label('Dose Rate (CPM)', labelpad=30, fontsize=22)
+    cbar_ticks = [0, threshold  * 0.2, threshold  * 0.4, threshold  * 0.6, threshold  * 0.8, threshold]
+    cbar.set_ticks(cbar_ticks)
+    cbar.set_ticklabels([f'{tick:.1f}' for tick in cbar_ticks])
+    cbar.ax.tick_params(labelsize=20)
+    
