@@ -137,7 +137,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     data['citizen_id'] = citizen_id
     data['detector'] = detector
-    data['detector_serial'] = detector_serial.replace(" ", "_")
+    data['detector_serial'] = detector_serial.replace(" ", "_").replace("\\", "_").replace("/", "_")
     
     if submission_date == None:
         data['submission_date'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
