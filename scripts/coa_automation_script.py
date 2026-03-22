@@ -19,7 +19,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 18 Mar 2026
+Version: 22 Mar 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -661,7 +661,7 @@ def result_email(sender, submission, image_path, html_path):
     html_body = f"""
     <html><body>
     {body_msg}
-    <img src="cid:image1">
+    <img src="cid:static_results.png">
     </body></html>
     """
     msg_alternative.attach(MIMEText(html_body, 'html'))
@@ -669,11 +669,13 @@ def result_email(sender, submission, image_path, html_path):
     # embed image
     with open(image_path, 'rb') as f:
         img = MIMEImage(f.read())
-        img.add_header('Content-ID', '<image1>')
+        img.add_header('Content-ID', '<static_results.png>')
+        # ensure img file has associated filename
+        img.add_header('Content-Disposition', 'inline', filename='static_results.png')
         message.attach(img)
     
     # html file attachment
-    filename = "results.html"
+    filename = "interactive_results.html"
     with open(html_path, "rb") as f:
         mime_part = MIMEBase('text', 'html')
         mime_part.set_payload(f.read())
