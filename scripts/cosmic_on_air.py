@@ -16,7 +16,7 @@ Description:
     
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 21 Mar 2026
+Version: 25 Apr 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -553,18 +553,30 @@ def read_otherdata_csv(data_filename, detector=""):
                 try:
                     row = line.split(';')
                     
-                    #strip milliseconds from time
-                    temp_time = datetime.strptime(row[0].strip()[:18], "%Y-%m-%d %H:%M:%S")
+                    alt_format = False
                     
-                    temp_cnt = row[3]
+                    #strip milliseconds from time
+                    try:
+                        temp_time = datetime.strptime(row[0].strip()[:18], "%Y-%m-%d %H:%M:%S")
+                        temp_cnt = row[3]
+                    except:
+                        row = line.split(',')
+                        alt_format = True
+                        temp_time = datetime.strptime(row[1].strip()[:19], "%Y.%m.%d  %H.%M.%S")
+                        temp_cnt = row[2]
                     
                     if temp_cnt == "":
                         continue
+                    
                     data['time'].append(temp_time)
                     
-                    data['cnt_1mn'].append(int(float(temp_cnt)*60))
-                    data['cnt_5sc'].append(int(float(temp_cnt)*5))
-                    
+                    if not alt_format:
+                        data['cnt_1mn'].append(int(float(temp_cnt)*60))
+                        data['cnt_5sc'].append(int(float(temp_cnt)*5))
+                    else:
+                        data['cnt_1mn'].append(int(temp_cnt))
+                        data['cnt_5sc'].append(int(float(temp_cnt)/20))
+                        
                     data['lat'].append(np.nan)
                     data['lon'].append(np.nan)
                     data['alt'].append(np.nan)
@@ -615,8 +627,10 @@ def read_otherdata_csv(data_filename, detector=""):
     for key in data:
         if type(data[key]) is list:
             data[key] = np.array(data[key])
-            
     
+    if len(data['time']) <= 1:
+        raise Exception("Could not interpret data format of provided .csv file")
+        
     return data
 
 ####################################################################################################
@@ -669,7 +683,8 @@ def read_flight_kml(kml_filename):
         except ValueError:
             continue
     else:
-        raise ValueError(f"Unrecognized date format: {date_str}")
+        data['date'] = datetime.now().date()
+        #raise ValueError(f"Unrecognized date format: {date_str}")
     
     data['flight_number'] = kml_name[name_idx:date_idx-1]
     data['origin ICAO'] = kml_name[origin_idx:origin_idx+4]

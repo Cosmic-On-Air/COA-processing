@@ -19,7 +19,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 22 Mar 2026
+Version: 30 Mar 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -634,11 +634,11 @@ def result_email(sender, submission, image_path, html_path):
 
     <p>Thank you for your data submission to Cosmic On Air.</p>
 
-    <p>Attached is an analysis of the data from your flight. (The HTML file can be opened in any 
-    web browser; however we recommend using a desktop browser for optimal scaling and reliability, 
-    since mobile browsers may not fully support interactive features.) The green lines are the 
-    estimated dose rates from the CARI-7A code, and your data are plotted in yellow. The world
-    map is interactive.</p>
+    <p>Attached is an analysis of the data from your flight. (The HTML file can be downloaded and 
+    opened in any web browser; however we recommend using a desktop browser for optimal scaling 
+    and reliability, since mobile browsers may not fully support interactive features.) The green 
+    lines are the estimated dose rates from the CARI-7A code, and your data are plotted in yellow. 
+    The world map is interactive.</p>
     
     <p>If you have queries, please reply to this email.</p>
     
