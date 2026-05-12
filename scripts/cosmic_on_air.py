@@ -562,8 +562,12 @@ def read_otherdata_csv(data_filename, detector=""):
                     except:
                         row = line.split(',')
                         alt_format = True
-                        temp_time = datetime.strptime(row[1].strip()[:19], "%Y.%m.%d  %H.%M.%S")
-                        temp_cnt = row[2]
+                        try:
+                            temp_time = datetime.strptime(row[1].strip()[:19], "%Y.%m.%d  %H.%M.%S")
+                            temp_cnt = row[2]
+                        except:
+                            temp_time = datetime.strptime(row[0].strip()[:19], "%Y.%m.%d  %H.%M.%S")
+                            temp_cnt = row[1]
                     
                     if temp_cnt == "":
                         continue
