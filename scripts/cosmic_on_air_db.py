@@ -1120,7 +1120,7 @@ if __name__ == "__main__":
                 flight_valid = True
             
             if file.is_file() and flight_valid:
-                db.add(file, flight, detector=detector, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date"C:\Users\aidan\OneDrive - University of Cape Town\Cosmic On Air\FlightData-20260619T160959Z-3-001\FlightData\SAA302 2026-05-22 Radiacode_103\backup\CPT JHB SA302 22 May 2026 Radiacode - Aidan Gebbie.csv")
+                db.add(file, flight, detector=detector, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date)
             if not file.is_file():
                 print("Data file path invalid.")
             if not flight_valid:
