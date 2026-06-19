@@ -16,7 +16,7 @@ Description:
     
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 25 Apr 2026
+Version: 19 Jun 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -24,42 +24,41 @@ J. Trickett, Department of Physics, University of Cape Town, South Africa
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
 """
 
-version = "v1" # version of script is indicated in processed log files
+####################################################################################################
+#Imports the modules we need
+#Make sure you have these installed prior to running this code
+import os
+import base64 # to store images
+import tempfile
+import shutil
+import time
+import subprocess
+import airportsdata
+from pathlib import Path
+from datetime import datetime, timedelta, UTC
+from pykml import parser
+from matplotlib import pyplot as plt
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+import numpy as np
+from scipy.signal import butter, filtfilt
+
+# version of script is indicated in processed log files
+version = "v1"
 cari_version = "CARI-7A v4.2.0"
 
-import os
 if os.name == "nt":   # Windows cari
     cari_exe = "cari7a420.exe"
 else:                 # Linux / macOS (posix)
     cari_exe = "cari7a_4.2.0(intel_linux)"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = Path(__file__).parent.resolve()
 
+logo_path = BASE_DIR / "images" / "CosmicOnAir_transparent_color_logo.png"
+wide_logo_path = BASE_DIR / "images" / "CosmicOnAir_rounded_horizontal.png"
 
-logo_path = os.path.join(BASE_DIR, "images", "CosmicOnAir_transparent_color_logo.png")
-wide_logo_path = os.path.join(BASE_DIR, "images", "CosmicOnAir_rounded_horizontal.png")
-
-####################################################################################################
-#Imports the modules we need
-#Make sure you have these installed prior to running this code
-import tempfile
-import shutil
-from datetime import datetime, timedelta
-import time
-import numpy as np
-import subprocess
-from pykml import parser
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from matplotlib import pyplot as plt
-import cartopy.crs as ccrs
-import airportsdata
-#from scipy.stats import t, f
-from scipy.signal import butter, filtfilt
-import base64 # to store images
-
-coa_logo = base64.b64encode(open(logo_path, 'rb').read())
-coa_logo2 = base64.b64encode(open(wide_logo_path, 'rb').read())
+coa_logo = base64.b64encode(logo_path.open('rb').read())
+coa_logo2 = base64.b64encode(wide_logo_path.open('rb').read())
 
 ####################################################################################################
 def data_id(data):
@@ -70,14 +69,122 @@ def data_id(data):
     Parameters
     data : data dictionary with 'flight_number', 'detector_id' and 'date' keys
         date must be a datetime
+        
+    Returns
+    id : string defined as per description
     """
     serial = " " + data['detector_serial']
     if serial == " UNKNOWN": serial = ""
     
     return data['flight_number'] + " " + data['date'].strftime("%Y-%m-%d") + " " + data['detector'] + serial
+            
+####################################################################################################
+def time2float(times, t0=None):
+    """
+    Function to convert an array of datetime objects to an array of seconds since initial time (floats)
+    
+    Parameters
+    arr : an array/list of time objects
+    
+    Returns
+    res : a numpy array of doubles, the time elapsed at a given index
+    """
+    if t0 is None: t0 = times[0]
+    return np.array([(t - t0).total_seconds() for t in times])
+            
+####################################################################################################
+def list2arr(dictionary):
+    """
+    Function to convert the lists in a dictionary to numpy arrays.
+    
+    Parameters
+    dictionary : a python dictionary
+    """
+    for key in dictionary:
+        if type(dictionary[key]) is list:
+            dictionary[key] = np.array(dictionary[key])
+            
+####################################################################################################
+def lat_lon_dist(lat1, lon1, lat2, lon2, radius=6371):
+    """
+    Function to find the distance between two points on the earth
+    
+    Parameters
+    ----------
+    lat1 : point 1 latitude (or set of points)
+    
+    lon1 : point 1 longitude (or set of points)
+    
+    lat2 : point 2 latitude (or set of points)
+    
+    lon2 : point 2 longitude (or set of points)
+    
+    radius : radius of the sphere; default: Earth's radius in km
+    
+    Returns
+    -------
+    
+    distance : distance between the points (or sets of points)
+    """
+    theta1 = np.radians(lat1)
+    theta2 = np.radians(lat2)
+    phi1 = np.radians(lon1)
+    phi2 = np.radians(lon2)
+    
+    a = np.sin((theta2-theta1)/2)**2 + np.cos(theta1) * np.cos(theta2) * np.sin((phi2-phi1)/2)**2
+    c = 2 * np.atan2(np.sqrt(a), np.sqrt(1-a))
+    return c * radius
+
+###################################################################################################
+def unravel_lon(lon):
+    """
+    Function to unravel longitude (prevent jumping over 180 to -180 line).
+    
+    Parameters
+    ----------
+    lon : numpy array of floats
+    
+    Returns
+    -------
+    unravelled_lon : numpy array of floats
+    """
+    # unravel longitude for certain graphs
+    unravelled_lon = lon.copy()
+    for i in range(1, unravelled_lon.size):
+        while unravelled_lon[i] - unravelled_lon[i-1] > 180:
+            unravelled_lon[i] -= 360
+        while unravelled_lon[i] - unravelled_lon[i-1] < -180:
+            unravelled_lon[i] += 360
+            
+    return unravelled_lon
 
 ####################################################################################################
-def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, detector_gps=False, parallel=6, time_delta=-1, disable_cari_weather=True, show_progress=True):
+def ravel_lon(lon):
+    """
+    Function to ravel up longitude (force range of (-180; 180]).
+    
+    Parameters
+    ----------
+    unravelled_lon : numpy array of floats
+    
+    Returns
+    -------
+    lon : numpy array of floats
+    """
+    return (lon + 180) % 360 - 180
+
+####################################################################################################
+def read_raw_log(log_filename, 
+                 flight_filename="", 
+                 detector="UNKNOWN",
+                 detector_serial="UNKNOWN", 
+                 citizen_id="UNKNOWN", 
+                 submission_date=None, 
+                 detector_gps=False, 
+                 parallel=6, 
+                 time_delta=-1, 
+                 disable_cari_weather=True, 
+                 show_progress=True):
     """
     Function to read and parse the log file and KML file and sort the data into a variety of categories including:
     detector ID, datetime, count rate  and GPS coordinates.
@@ -122,6 +229,10 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     """
     
+    log_filename = Path(log_filename)
+    raw_flight_filename = flight_filename # keep raw incase it indicatedate and flightnumber
+    flight_filename = Path(flight_filename)
+    
     data = {'detector' : "", 'detector_serial' : "", 
             'flight_number' : "",
             'origin' : "", 'destination' : "",
@@ -140,12 +251,12 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     data['detector_serial'] = detector_serial.replace(" ", "_").replace("\\", "_").replace("/", "_")[:30]
     
     if submission_date == None:
-        data['submission_date'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data['submission_date'] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     else:
         data['submission_date'] = submission_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data['processing_date'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    data['processing_date'] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    if disable_cari_weather==True:
+    if disable_cari_weather:
         data['processing_pipeline'] = "fit_data_to_cari_without_weather"
     else:
         data['processing_pipeline'] = "fit_data_to_cari_with_weather"
@@ -169,7 +280,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
             raise ValueError("Unknown detector")
             
     else: # try determine detector by typical file extension
-        _, ext = os.path.splitext(os.path.basename(log_filename))
+        ext = log_filename.suffix
         ext = ext.lower()
         if ext == ".log":
             detector_data = read_safecast_log(log_filename)
@@ -198,14 +309,14 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     ##############################################################
     # flight data processing
-    _, ext = os.path.splitext(os.path.basename(flight_filename))
+    ext = flight_filename.suffix
     if ext == ".kml":
         flight_data = read_flight_kml(flight_filename)
     elif ext == ".csv":
         flight_data = read_flight_csv(flight_filename)
     else: # try extract date and flight number from flight string, else prompt console
         try:
-            rows = flight_filename.split(",")
+            rows = raw_flight_filename.split(",")
             # Try to use detector gps data anyways since no flight data is available
             takeoff = datetime.strptime(rows[0].strip(), "%Y-%m-%d %H:%M:%S")
             landing = datetime.strptime(rows[1].strip(), "%Y-%m-%d %H:%M:%S")
@@ -246,7 +357,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
     
     #############################################################
     # Generate reference data from CARI-7A
-    if os.path.isfile(os.path.join(BASE_DIR, "CARI_7A_DVD/CARI-7A.exe")) and parallel > 0:
+    if (BASE_DIR / "CARI_7A_DVD" / cari_exe).is_file() and parallel > 0:
         # Generate reference CARI-7A radiation values
         cari_data = gen_cari_data(flight_data, parallel=parallel, disable_weather=disable_cari_weather, show_progress=show_progress)
         
@@ -319,9 +430,9 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
         data['alt'] = np.full_like(data['time'], np.nan, dtype=np.float64)
         
     ###############################################################
-    #Interpolate the FlightAware gps data to estimate longitude, latitude, and altitude
-    time = np.array([(d - data['takeoff']).total_seconds() for d in data['time']])
-    time_flight = np.array([(d - data['takeoff']).total_seconds() for d in flight_data['time']])
+    #Interpolate the flight gps data to estimate longitude, latitude, and altitude
+    time = time2float(data['time'], data['takeoff'])
+    time_flight = time2float(flight_data['time'], data['takeoff'])
     
     # unwrap longitude so interpolation works correctly across 180° line
     adjusted_lon = unravel_lon(np.array(flight_data['lon']))
@@ -341,10 +452,7 @@ def read_raw_log(log_filename, flight_filename="", detector="UNKNOWN", detector_
         data['total-neutron'] = np.interp(time, time_flight, cari_data['total-neutron'])
         
         # in linear regression, if force α = 0, then β = ∑(x*y) / ∑(x²)
-        data['scaling_factor'] = np.sum(data['cnt_1mn'] * data['total-neutron']) / np.sum(data['cnt_1mn']**2)
-        
-    # Reset cnt_tot data to 0 + data['cnt_1mn'][0] at start of flight
-    #data['cnt_tot'] -= data['cnt_tot'][0] - data['cnt_1mn'][0]
+        data['scaling_factor'] = (data['cnt_1mn'] * data['total-neutron']).sum() / np.square(data['cnt_1mn']).sum()
     
     return data
     
@@ -368,7 +476,7 @@ def read_safecast_log(log_filename):
         'original' or 'derived'
     """
     
-    data = {'detector_serial' : "", 'cnt_1mn' : [], 'cnt_5sc' : [], #'cnt_tot' : [], 
+    data = {'detector_serial' : "", 'cnt_1mn' : [], 'cnt_5sc' : [], 
             'time' : [], 'lat' : [], 'lon' : [], 'alt' : []}
     
     data['cnt_1min_source'] = 'original'
@@ -387,11 +495,10 @@ def read_safecast_log(log_filename):
                 
                 data['cnt_1mn'].append(int(row[3]))
                 data['cnt_5sc'].append(int(row[4]))
-                #data['cnt_tot'].append(int(row[5]))
                 
                 lat, lon, alt = np.nan, np.nan, np.nan
                 # If we use the detector gps data, append it
-                # Else we will replace nan values with FlightAware data
+                # Else we will replace nan values with flight data
                 if row[12] == 'A':
                     lat = float(row[7][0:2]) + float(row[7][2:])/60
                     lon = float(row[9][0:3]) + float(row[9][3:])/60
@@ -406,9 +513,7 @@ def read_safecast_log(log_filename):
                 data['alt'].append(alt)
                 
     #Turn data lists into numpy arrays now that they are at their final size
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
+    list2arr(data)
             
     return data
 
@@ -429,7 +534,7 @@ def read_uct_data(data_filename):
         'original' or 'derived'
     """
     
-    data = {'detector_serial' : "", 'cnt_1mn' : [], 'cnt_5sc' : [], #'cnt_tot' : [], 
+    data = {'detector_serial' : "", 'cnt_1mn' : [], 'cnt_5sc' : [], 
             'time' : [], 'lat' : [], 'lon' : [], 'alt' : []}
     
     data['cnt_1min_source'] = 'original'
@@ -473,10 +578,7 @@ def read_uct_data(data_filename):
             data['cnt_1mn'][-1] += 1
         
     #Turn data lists into numpy arrays now that they are at their final size
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
-            
+    list2arr(data)
     
     return data
 
@@ -517,23 +619,24 @@ def read_otherdata_csv(data_filename, detector=""):
                 try:
                     row = line.split(',')
                     temp_time = None
+                    # try both time formats
                     for fmt in ("%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M"):
                         try:
                             temp_time = datetime.strptime(row[0].strip(), fmt)
                         except ValueError:
                             continue
                     if temp_time is None:
-                        continue
+                        continue # else skip the line
                     
-                    temp_cnt = row[3]
+                    cnt_1mn = row[3]
                     
-                    if temp_cnt == "":
-                        continue
+                    if cnt_1mn == "":
+                        continue # skip the line if no temp_cnt
 
                     data['time'].append(temp_time)
                     
-                    data['cnt_1mn'].append(int(temp_cnt))
-                    data['cnt_5sc'].append(int(temp_cnt)//12) # //(60/5)
+                    data['cnt_1mn'].append(int(cnt_1mn))
+                    data['cnt_5sc'].append(int(cnt_1mn)//12) # //(60/5)
                     
                     data['lat'].append(np.nan)
                     data['lon'].append(np.nan)
@@ -543,7 +646,7 @@ def read_otherdata_csv(data_filename, detector=""):
                 except IndexError: # e.g. not a data line
                     continue
                 
-        elif detector=="radiacode" or "Time;Timestamp;" in line1:
+        elif detector=="radiacode" or "Time;Timestamp;" in line1 or "Timestamp,Real time," in line1:
             data['detector'] = "Radiacode"
             data['cnt_1min_source'] = 'derived'
             data['cnt_5s_source'] = 'derived'
@@ -555,13 +658,13 @@ def read_otherdata_csv(data_filename, detector=""):
                     
                     alt_format = False
                     
-                    #strip milliseconds from time
+                    #strip milliseconds from time (ignore after index 18/19)
                     try:
                         temp_time = datetime.strptime(row[0].strip()[:18], "%Y-%m-%d %H:%M:%S")
                         temp_cnt = row[3]
                     except:
-                        row = line.split(',')
                         alt_format = True
+                        row = line.split(',')
                         try:
                             temp_time = datetime.strptime(row[1].strip()[:19], "%Y.%m.%d  %H.%M.%S")
                             temp_cnt = row[2]
@@ -575,9 +678,11 @@ def read_otherdata_csv(data_filename, detector=""):
                     data['time'].append(temp_time)
                     
                     if not alt_format:
+                        # in normal format, temp_cnt is average per second
                         data['cnt_1mn'].append(int(float(temp_cnt)*60))
                         data['cnt_5sc'].append(int(float(temp_cnt)*5))
                     else:
+                        # in alt format, temp_cnt is average per minute
                         data['cnt_1mn'].append(int(temp_cnt))
                         data['cnt_5sc'].append(int(float(temp_cnt)/20))
                         
@@ -589,7 +694,7 @@ def read_otherdata_csv(data_filename, detector=""):
                 except IndexError: # e.g. not a data line
                     continue
         
-        elif detector=="rium" or "rium" in data_filename.lower():
+        elif detector=="rium" or "rium" in str(data_filename).lower():
             data['detector'] = "Rium"
             data['cnt_1min_source'] = 'derived'
             data['cnt_5s_source'] = 'derived'
@@ -628,9 +733,7 @@ def read_otherdata_csv(data_filename, detector=""):
             raise Exception("Could not interpret data format of provided .csv file")
                 
     #Turn data lists into numpy arrays now that they are at their final size
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
+    list2arr(data)
     
     if len(data['time']) <= 1:
         raise Exception("Could not interpret data format of provided .csv file")
@@ -671,26 +774,14 @@ def read_flight_kml(kml_filename):
     space1_idx = kml_name.find(" ")
     
     name_idx = kml_name.find(" ", space1_idx+1) + 1
-    date_idx = kml_name.find(" ", name_idx) + 1
-    date_end_idx = kml_name.find(" ", date_idx)
+    name_end_idx = kml_name.find(" ", name_idx) + 1
     
     origin_idx = kml_name.rfind("-") - 4
     dest_idx = kml_name.rfind(")") - 4
     
-    # try determine date format in kml file (several known versions)
-    formats = ["%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y"] # DD-MMM-YYYY, YYYY-MM-DD, DD-MM-YYYY
-    date_str = kml_name[date_idx:date_end_idx]
-    for string in formats:
-        try:
-            data['date'] = datetime.strptime(date_str, string).date()
-            break
-        except ValueError:
-            continue
-    else:
-        data['date'] = datetime.now().date()
-        #raise ValueError(f"Unrecognized date format: {date_str}")
+    # date no longer extracted from unreliable flight name, uses takeoff time exclusively
     
-    data['flight_number'] = kml_name[name_idx:date_idx-1]
+    data['flight_number'] = kml_name[name_idx:name_end_idx-1]
     data['origin ICAO'] = kml_name[origin_idx:origin_idx+4]
     data['destination ICAO'] = kml_name[dest_idx:dest_idx+4]
     data['origin'] = airports.get(data['origin ICAO'])['city']
@@ -707,13 +798,22 @@ def read_flight_kml(kml_filename):
         data['lat'].append(float(tmp[1]))
         data['alt'].append(float(tmp[2]))
         
+    # ensure length of all datasets is the same
+    shortest = len(data['time'])
+    for key in ['lat', 'lon', 'alt']:
+        if len(data[key]) < shortest:
+            shortest = len(data[key])
+            
+    for key in ['time', 'lat', 'lon', 'alt']:
+        data[key] = data[key][:shortest]
+    
+        
     # Save takeoff and landing times (start and end of FlightAware data)
     data['takeoff'] = data['time'][0]
     data['landing'] = data['time'][-1]
+    data['date'] = data['takeoff'].date()
     
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
+    list2arr(data)
     
     return data
 
@@ -751,9 +851,7 @@ def read_flight_csv(csv_filename):
             data['lon'].append(float(line[4]))
             data['alt'].append(float(line[5]) * 0.3048) # convert feet to meters
             
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
+    list2arr(data)
             
     data = recover_flight(data, data['takeoff'], data['landing'], data['flight_number'])
     
@@ -797,87 +895,71 @@ def read_processed_log(log_filename):
     
     airports = airportsdata.load("ICAO") # load airports dictionary
     
+    headers = {"# format =" : 'version',
+               
+               "flight_number =" : 'flight_number',
+               
+               "detector_name =" : 'detector',
+               "detector_serial_number =" : 'detector_serial',
+               "detector_native_quantity =" : 'detector_native_quantity',
+               "cnt_1min_source =" : 'cnt_1min_source',
+               "cnt_5s_source =" : 'cnt_5s_source',
+               "processing_pipeline =" : 'processing_pipeline',
+               
+               "detector_timestamps =" : 'timestamps',
+               
+               "citizen_id =" : 'citizen_id',
+               "submission_date =" : 'submission_date',
+               "processing_date =" : 'processing_date',
+               "reference_id =" : 'reference_id',
+               "reference_model =" : 'reference_model',
+               "reference_quantity =" : 'reference_quantity',
+               "reference_alignment_method =" : 'reference_alignment_method',
+               "reference_time_offset_s =" : 'time_offset',
+               "reference_fit_r2 =" : 'R2',
+               "simulation_version =" : 'simulation_version',
+               "simulation_total =" : 'simulation_total',
+               "simulation_neutron =" : 'simulation_neutron',
+               "simulation_unit =" : 'simulation_unit'}
+    
     with open(log_filename, "r", encoding="utf-8", errors="replace") as f:        
         for line in f:
             if line.startswith("#"):
-                if "# format =" in line:
-                    data['version'] = strip_context(line)
-                    
-                elif "detector_name =" in line:
-                    data['detector'] = strip_context(line)
-                elif "detector_serial_number =" in line:
-                    data['detector_serial'] = strip_context(line)
-                elif "detector_native_quantity =" in line:
-                    data['detector_native_quantity'] = strip_context(line)
-                elif "cnt_1min_source =" in line:
-                    data['cnt_1min_source'] = strip_context(line)
-                elif "cnt_5s_source =" in line:
-                    data['cnt_5s_source'] = strip_context(line)
-                elif "processing_pipeline =" in line:
-                    data['processing_pipeline'] = strip_context(line)
-                    
-                elif "origin =" in line:
+                for key in headers:
+                    if key in line:
+                        data[headers[key]] = strip_context(line)
+                
+                # some special headers need extra processing, so handled seperately
+                if "origin =" in line:
                     data['origin ICAO'] = strip_context(line)
                     data['origin'] = airports.get(data['origin ICAO'])['city']
                 elif "destination =" in line:
                     data['destination ICAO'] = strip_context(line)
                     data['destination'] = airports.get(data['destination ICAO'])['city']
-                elif "flight_number =" in line:
-                    data['flight_number'] = strip_context(line)
                 elif "takeoff_utc =" in line:
                     data['takeoff'] = datetime.strptime(strip_context(line), "%Y-%m-%dT%H:%M:%SZ")
                     data['date'] = data['takeoff'].date()
                 elif "landing_utc =" in line:
                     data['landing'] = datetime.strptime(strip_context(line), "%Y-%m-%dT%H:%M:%SZ")
                 
-                elif "detector_timestamps =" in line:
-                    data['timestamps'] = strip_context(line)
-                    
-                elif "citizen_id =" in line:
-                    data['citizen_id'] = strip_context(line)
-                elif "submission_date" in line:
-                    data['submission_date'] = strip_context(line)
-                elif "processing_date =" in line:
-                    data['processing_date'] = strip_context(line)
-                
-                elif "reference_id =" in line:
-                    data['reference_id'] = strip_context(line)
-                elif "reference_model =" in line:
-                    data['reference_model'] = strip_context(line)
-                elif "reference_quantity =" in line:
-                    data['reference_quantity'] = strip_context(line)
-                elif "reference_alignment_method =" in line:
-                    data['reference_alignment_method'] = strip_context(line)
-                elif "reference_time_offset_s =" in line:
-                    data['time_offset'] = strip_context(line)
                 elif "reference_scaling_beta =" in line:
                     try:
                         data['scaling_factor'] = float(strip_context(line))
                     except:
                         data['scaling_factor'] = 0.0
-                elif "reference_fit_r2 =" in line:
-                    data['R2'] = strip_context(line)
+                        
                 elif "simulation_model =" in line:
                     data['simulation_model'] = strip_context(line)
                     if "cari-7a" in data['simulation_model'].lower():
                         has_reference = True
                         data['cari_total'] = []
                         data['total-neutron'] = []
-                elif "simulation_version =" in line:
-                    data['simulation_version'] = strip_context(line)
-                elif "simulation_total =" in line:
-                    data['simulation_total'] = strip_context(line)
-                elif "simulation_neutron =" in line:
-                    data['simulation_neutron'] = strip_context(line)
-                elif "simulation_unit =" in line:
-                    data['simulation_unit'] = strip_context(line)
             
             else:
                 row = line.split(",")
                 data['time'].append(datetime.strptime(row[0].strip(),'%Y-%m-%dT%H:%M:%SZ'))
                 data['cnt_1mn'].append(int(row[1]))
                 data['cnt_5sc'].append(int(row[2]))
-                #data['cnt_tot'].append(int(row[3]))
                 data['lat'].append(float(row[3]))
                 data['lon'].append(float(row[4]))
                 data['alt'].append(float(row[5]))
@@ -887,9 +969,7 @@ def read_processed_log(log_filename):
                     data['total-neutron'].append(float(row[6]) - float(row[7]))
     
     #Turn data lists into numpy arrays now that they are at their final size
-    for key in data:
-        if type(data[key]) is list:
-            data[key] = np.array(data[key])
+    list2arr(data)
     
     return data
 
@@ -905,7 +985,7 @@ def write_newlog(data, new_file):
     new_file : name of the new file to create
     
     """
-    with open(str(new_file), 'w', encoding="utf-8") as f:
+    with open(new_file, 'w', encoding="utf-8") as f:
         
         f.write(f"# format = {data['version']}\n")
         f.write("# data delimiter = comma\n")
@@ -988,75 +1068,6 @@ def write_newlog(data, new_file):
                                           f"{(data['cari_total'][i] - data['total-neutron'][i]):.4e}"])
                 
             f.write(line + "\n")
-
-####################################################################################################
-def lat_lon_dist(lat1, lon1, lat2, lon2, radius=6371):
-    """
-    Function to find the distance between two points on the earth
-    
-    Parameters
-    ----------
-    lat1 : point 1 latitude (or set of points)
-    
-    lon1 : point 1 longitude (or set of points)
-    
-    lat2 : point 2 latitude (or set of points)
-    
-    lon2 : point 2 longitude (or set of points)
-    
-    radius : radius of the sphere; default: Earth's radius in km
-    
-    Returns
-    -------
-    
-    distance : distance between the points (or sets of points)
-    """
-    theta1 = np.radians(lat1)
-    theta2 = np.radians(lat2)
-    phi1 = np.radians(lon1)
-    phi2 = np.radians(lon2)
-    
-    a = np.sin((theta2-theta1)/2)**2 + np.cos(theta1) * np.cos(theta2) * np.sin((phi2-phi1)/2)**2
-    c = 2 * np.atan2(np.sqrt(a), np.sqrt(1-a))
-    return c * radius
-
-###################################################################################################
-def unravel_lon(lon):
-    """
-    Function to unravel longitude (prevent jumping over 180 to -180 line).
-    
-    Parameters
-    ----------
-    lon : numpy array of floats
-    
-    Returns
-    -------
-    unravelled_lon : numpy array of floats
-    """
-    # unravel longitude for certain graphs
-    unravelled_lon = lon.copy()
-    for i in range(1, unravelled_lon.size):
-        while unravelled_lon[i] - unravelled_lon[i-1] > 180:
-            unravelled_lon[i] -= 360
-        while unravelled_lon[i] - unravelled_lon[i-1] < -180:
-            unravelled_lon[i] += 360
-            
-    return unravelled_lon
-
-####################################################################################################
-def ravel_lon(lon):
-    """
-    Function to ravel up longitude (force range of (-180; 180]).
-    
-    Parameters
-    ----------
-    unravelled_lon : numpy array of floats
-    
-    Returns
-    -------
-    lon : numpy array of floats
-    """
-    return (lon + 180) % 360 - 180
 
 ####################################################################################################
 def recover_flight(data, takeoff=None, landing=None, flight_number=""):
@@ -1157,8 +1168,7 @@ def fix_times(data_time, delta=-1, max_dt=1800):
     -------
     data_time : a new array of datetime objects with attempted corrections to timestamps.
     """
-    
-    times = np.array([(d - data_time[0]).total_seconds() for d in data_time], dtype=np.int64)
+    times = np.array(time2float(data_time), np.int64)
     
     dt = times[1:] - times[:-1]
     
@@ -1233,29 +1243,6 @@ def fix_times(data_time, delta=-1, max_dt=1800):
                 dt[i] = delta
     
     times = np.concatenate([[0], np.cumsum(dt)])
-    
-    # correct_idx = np.argmax(valid_dt) + 1 # set to the first correct index
-    
-    # # correct times working backward from first valid timestamp
-    # for i in range(correct_idx, 0, -1):
-    #     times[i-1] = times[i] - delta
-    
-    # # interpolate ranges where start and end times are known
-    # for i in range(correct_idx+1, times.size):
-    #     if times[correct_idx] < times[i] < times[correct_idx] + delta * (i-correct_idx) + max_dt:
-    #         # if there is a range of incorrect time, interpolate them
-    #         if correct_idx != i-1:
-    #             times[correct_idx:i] = np.linspace(times[correct_idx], times[i], i-correct_idx)
-                
-    #         correct_idx = i
-    #     # else index is incorrect
-    
-    # correct times after last valid time to end of data
-    
-    # for i in range(correct_idx+1, times.size):
-    #     times[i] = times[i-1] + delta
-        
-    # times = np.round(times)
 
     # finally return the correct times, rounded to the nearest second
     return np.array([data_time[0] + timedelta(seconds=int(t)) for t in times])
@@ -1473,7 +1460,7 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
     hour = [str(location['time'][0].hour + 1)] # cari requires UTC+1
     t_subsampled = [0]
     
-    t = np.array([(d - location['time'][0]).total_seconds() for d in location['time']])
+    t = time2float(location['time'])
     
     # only include entries if displacement >2km or altitude change >0.1km
     for i in range(1, len(location['lat'])):
@@ -1515,38 +1502,38 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
     so python code duplicates the folder and runs multiple subprocesses in parallel
     """
     
-    #round width up
+    # partition data into a number of subarrays, round width up
     widths = [int(size/parallel + 1)] * parallel
     widths[-1] = size - sum(widths[:-1])
     
     # Path to the original folder
-    src = os.path.join(BASE_DIR, 'CARI_7A_DVD')
+    src = BASE_DIR / 'CARI_7A_DVD'
 
     # change CARI-7A settings to work in non-menus mode (and possibly OS)
-    ini_file = os.path.join(src, 'CARI.INI')
-    with open(ini_file, "r+") as f:
+    ini_file = src / 'CARI.INI'
+    with ini_file.open("r+") as f:
         lines = f.readlines()
         
         if os.name == "nt": 
             lines[3] = lines[3].replace("UNIX", "WIN")
         else: # if not windows, change mode to unix/linux
             lines[3] = lines[3].replace("WIN", "UNIX")
-        lines[5] = lines[5].replace("YES", "NO!")
+        lines[5] = lines[5].replace("YES", "NO!") # menuless
         
         f.seek(0)
         f.writelines(lines)
 
-    # change CARI-7A settings to work in non-menus mode
-    default_file = os.path.join(src, 'DEFAULT.INP')
-    with open(default_file, "r+") as f:
+    # indicate file to process (DATA.LOC)
+    default_file = src / 'DEFAULT.INP'
+    with default_file.open("r+") as f:
         lines = f.readlines()
         lines[4] = " DATA.LOC\n"
         f.seek(0)
         f.writelines(lines)
         
     # Set CARI-7A to ignore geomagnetic storms or Furbush effect in the reference
-    userdata_file = os.path.join(src, 'FROMUSER.DAT')
-    with open(userdata_file, "r+") as f:
+    userdata_file = src / 'FROMUSER.DAT'
+    with userdata_file.open("r+") as f:
         lines = f.readlines()
         if disable_weather:
             lines[0] = " 2, 'Kp index'\n" #geomagnetically quiet
@@ -1560,18 +1547,19 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
     
     # Create a temporary directory to parallelize CARI_7A execution in
     with tempfile.TemporaryDirectory() as tmpdirname:
+        tmpdirname = Path(tmpdirname)
         offset = 0
         for p in range(parallel):
-            dst = os.path.join(tmpdirname, str(p))
+            dst = tmpdirname / str(p)
         
             # Copy the folder and all its contents
             shutil.copytree(src, dst)
                 
             #Name of output files
-            filename = os.path.join(dst, 'DATA.LOC') #Total radiation
+            filename = dst / 'DATA.LOC' #Total radiation
             
             #Writes all the formatted information to the total and neutronradiation .LOC file        
-            with open(filename, "w") as f:
+            with filename.open("w") as f:
                 f.write("START-------------------------------------------------\n")
                 for i in range(offset, offset+widths[p]):
                     #P0, specifies total radiation in CARI-7, P1 specifies neutron radiation
@@ -1587,8 +1575,8 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
             instances = []
             stdout = subprocess.PIPE
             for i in range(parallel):  # launch 3 instances
-                dst = os.path.join(tmpdirname, str(i))
-                exe = os.path.join(dst, cari_exe)
+                dst = tmpdirname / str(i)
+                exe = dst / cari_exe
                 p = subprocess.Popen(
                     exe,
                     cwd=dst,
@@ -1609,21 +1597,21 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
             while any(p.poll() is None for p in instances):
                 line = instances[0].stdout.readline().strip()   # keep updating
                 
-                progress = "".join(char for char in line if char.isdecimal())
+                progress = "".join(char for char in line if char.isdecimal()) #get line number
                 if progress and show_progress: #only show 
                     progress = int(progress)/(widths[0]+1) * 50
                     print(f"\rProgress: {progress:4.1f}% ", end="")
                     
-            for p in instances:
+            for p in instances: # wait for leftovers
                 if p.poll() is None:
                     p.wait()
         
         # finally terminate all the processes (incase of a keyboard or other interrupt)
         finally:
-            for p in instances:
+            for p in instances: # send kill command
                 if p.poll() is None:
                     p.kill()
-            for p in instances:
+            for p in instances: # wait until all are killed
                 if p.poll() is None:
                     p.wait()
 
@@ -1632,12 +1620,12 @@ def gen_cari_data(location, parallel=4, disable_weather=True, show_progress=True
         
         offset = 0
         for p in range(parallel):
-            dst = os.path.join(tmpdirname, str(p))
+            dst = tmpdirname / str(p)
             
             #Name of output files
-            filename = os.path.join(dst, 'DATA.ANS') #Total radiation
+            filename = dst / 'DATA.ANS' #Total radiation
             
-            with open(filename, "r") as f:
+            with filename.open("r") as f:
                 f.readline()
                 for i in range(offset, offset+widths[p]):
                     line = f.readline().split(",")
@@ -2518,13 +2506,14 @@ def find_processed(log_filename):
     
     data : the data of the processed file, or None if it couldn't find any
     """
+    if type(log_filename) is str: log_filename = Path(log_filename)
     
-    file_path = os.path.dirname(log_filename)
-    file_name, ext = os.path.splitext(os.path.basename(log_filename))
+    file_path = log_filename.parent #os.path.dirname(log_filename)
+    file_name = log_filename.stem
     file_name = "".join(char for char in file_name if char.isdecimal()) #extract log number
-    processed_file_name = f"{file_path}{os.sep}Processed_data_{file_name}.log"
+    processed_file_name = file_path / f"Processed_data_{file_name}.log"
     
-    if os.path.isfile(processed_file_name):
+    if processed_file_name.is_file():
         print("found existing processed data .log file")
         return read_processed_log(processed_file_name) 
     else:
@@ -2646,48 +2635,4 @@ def plot_altitude(data, plot_title):
     plt.ylabel('Counts per Minute', fontsize=14)
     #Titles the plot - you can change this to match your data
     plt.title(plot_title, fontsize=14)
-
-####################################################################################################
-def plot_world(data, plot_title):
-    """
-    Function to plot the Counts per minute as coloured points on a worldmap with matplotlib
-    
-    Parameters
-    ----------
-    
-    data : data from detector .log file
-    
-    plot_title : String for the title of the plot
-    """
-
-    #Plots the world map
-    fig = plt.figure(figsize=(25, 15))
-    ax1 = fig.add_subplot(111,projection=ccrs.PlateCarree())
-    ax1.stock_img()
-
-    #Ensures that any radiation > 95% of the max radiation does not skew the colour map
-    d_tmp = data['cnt_1mn']
-    threshold = max(d_tmp) * 0.95
-    d_tmp = [d if d < threshold else threshold for d in d_tmp]
-
-    # take a moving average of the data to smoothen the graph out
-    d_tmp = moving_average(d_tmp, 5)
-
-    #Plots the flight path
-    p1=plt.scatter(data['lon'], data['lat'], c=d_tmp, cmap='inferno_r', vmin = 0, vmax = threshold)
-
-    #Ensures that the whole world map is plotted
-    #These limits can be changed if you would like to zoom into the flight path
-    plt.xlim(-180, 180)
-    plt.ylim(-90,90)
-    #Titles the plot
-    plt.title(plot_title, fontsize = 24)
-
-    #Creates a legend for the colour-map
-    cbar = plt.colorbar(p1, ax=ax1, orientation='vertical')
-    cbar.set_label('Dose Rate (CPM)', labelpad=30, fontsize=22)
-    cbar_ticks = [0, threshold  * 0.2, threshold  * 0.4, threshold  * 0.6, threshold  * 0.8, threshold]
-    cbar.set_ticks(cbar_ticks)
-    cbar.set_ticklabels([f'{tick:.1f}' for tick in cbar_ticks])
-    cbar.ax.tick_params(labelsize=20)
     
