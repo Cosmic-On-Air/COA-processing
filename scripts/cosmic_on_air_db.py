@@ -26,7 +26,7 @@ Structure and format of the database:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 7 Mar 2026
+Version: 19 Jun 2026
 
 Contributors:
 A. Gebbie, Department of Physics, University of Cape Town, South Africa
@@ -36,14 +36,29 @@ A. Gebbie, Department of Physics, University of Cape Town, South Africa
 # Import required classes
 import sqlite3
 import cosmic_on_air as coa
-import os
-import shutil, stat
+import stat
 import airportsdata
-from iso3166 import countries # to retrieve country name since airportsdata only stores country code
 import plotly.io as pio
-from datetime import datetime
+from pathlib import Path
+from iso3166 import countries # to retrieve country name since airportsdata only stores country code
+from datetime import datetime, UTC
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = Path(__file__).parent.resolve()
+
+def _rmtree(root):
+    """
+    Function to delete a file tree. It ensures folders are writable before deleting
+
+    Parameters
+    ----------
+    root : Path object of root folder
+    """
+    root.chmod(stat.S_IWRITE) # make sure file is writable
+    for p in root.iterdir():
+        if p.is_dir():
+            _rmtree(p)
+        else: p.unlink()
+    root.rmdir()
 
 class CoaDatabase:
     def __init__(self, path, new_db=False, show_figures=True, include_plotlyjs=True, show_progress=True):
@@ -64,14 +79,14 @@ class CoaDatabase:
             (default=True, to reduce html file size by 3MB use "cdn", 
              this fetches it online (see plotly write_html for details))
         """
-        database_file = os.path.join(path, "coa.db")
+        path = Path(path)
+        database_file = path / "coa.db"
     
-        if not new_db and not os.path.isfile(database_file):
+        if not new_db and not database_file.is_file():
             raise ValueError("Invalid path to database")
         
         pio.renderers.default = 'browser'
         
-        self.path = path
         self.db = database_file
         self.db_path = path
         self.conn = None
@@ -215,7 +230,7 @@ class CoaDatabase:
         data = []
         
         for entry in entries:            
-            file = os.path.join(self.db_path, entry[8])
+            file = self.db_path / entry[8]
             data.append(coa.read_processed_log(file))
         
         return data
@@ -230,15 +245,15 @@ class CoaDatabase:
         """
         
         fig = coa.plot_all(self.get_all_data())
+        figure_dest = Path(figure_dest)
         
         if self.show:
             fig.show()    
             
-        if os.path.isdir(figure_dest):
-            filename = ("all_flights.html")
+        if figure_dest != Path("") and figure_dest.is_dir():
+            filename = "all_flights.html"
             print(f"Figure saved as '{filename}'")
-            name = os.path.join(figure_dest, filename)
-            fig.write_html(name, include_plotlyjs=self.include_plotlyjs)
+            fig.write_html(figure_dest / filename, include_plotlyjs=self.include_plotlyjs)
         
         return fig
         
@@ -353,13 +368,20 @@ class CoaDatabase:
             print("Nothing found.")
             return None
         
-        file = os.path.join(self.db_path, items[0][8])
+        file = self.db_path / items[0][8]
         data = coa.read_processed_log(file)
         
         return data
     
-    def add(self, log_file, flight_file="", detector_id="UNKNOWN", detector_serial="UNKNOWN", citizen_id="UNKNOWN", submission_date=None, parallel=8, time_delta=-1, raise_duplicate=True):
-        # TODO : update function description
+    def add(self, log_file, 
+            flight_file="", 
+            detector="UNKNOWN", 
+            detector_serial="UNKNOWN", 
+            citizen_id="UNKNOWN", 
+            submission_date=None, 
+            parallel=8, 
+            time_delta=-1, 
+            raise_duplicate=True):
         """
         Method to add a new detector measurement to the database.
         
@@ -369,15 +391,18 @@ class CoaDatabase:
         
         flight_file : Absolute path to the flight ADS-B file to add to the database
             (default: ""; can be left blank, and read_raw_log function will instead use detector gps)
+            
+        detector : string name of the detector
+            (default: "UNKNOWN")
+        
+        detector_serial : string serial number of the detector
+            (default: "UNKNOWN")
         
         citizen_id : identity of the individual who submitted the data
             (default: "UNKNOWN")
             
         parallel: Number of parallel instances of CARI-7A software to run to speed up reference data
             compute speed (default: 8 threads)
-            
-        subsample : number of points to subsample when using the CARI software, significantly reduces time taken at
-            minimal loss in precision.
             
         time_delta : default=-1. If greater than 0, the software will attempt to recover corrupted timestamps in data
             the value it is set to will be the delta time used between measurements if the end timestamp is corrupted.
@@ -394,7 +419,12 @@ class CoaDatabase:
         unique : True if the data was new and hence added to the database, otherwise false.
         """
         
-        data = coa.read_raw_log(log_file, flight_file, detector=detector_id, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta, show_progress=self.show_progress)
+        log_file = Path(log_file)
+        if not log_file.is_file():
+            raise IOError("log file does not exist")
+        flight_file = Path(flight_file)
+        
+        data = coa.read_raw_log(log_file, flight_file, detector=detector, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date, parallel=parallel, time_delta=time_delta, show_progress=self.show_progress)
         
         if self.show:
             coa.plotly_plot(data).show()
@@ -406,27 +436,29 @@ class CoaDatabase:
         dest = airports.get(data['destination ICAO'])
         
         # generate absolute paths to use to create archive entry
-        folder = os.path.join(self.db_path, data_id)
-        backup_folder = os.path.join(folder, "backup")
+        folder = self.db_path / data_id
+        backup_folder = folder / "backup"
         
-        backup_log = os.path.join(backup_folder, os.path.basename(log_file))
-        if flight_file:
-            backup_flight = os.path.join(backup_folder, os.path.basename(flight_file))
+        backup_log = backup_folder / log_file.name
+        if flight_file != Path(""):
+            backup_flight = backup_folder / flight_file.name
+        else:
+            backup_flight = Path("")
             
-        new_log = os.path.join(folder, f"Data {data_id}.log")
+        new_log = folder / f"Data {data_id}.log"
         
         # Relative paths to store as metadata in SQL database
-        rel_path = os.path.join(data_id, f"Data {data_id}.log")
-        old_log = os.path.join(data_id, 'backup', os.path.basename(log_file))
-        if flight_file:
-            old_flight = os.path.join(data_id, 'backup', os.path.basename(flight_file)) 
+        rel_path = f"{data_id}/Data {data_id}.log"
+        old_log = f"{data_id}/backup/{log_file.name}"
+        if flight_file != Path(""):
+            old_flight = f"{data_id}/backup/{flight_file.name}"
         else:
             old_flight = ""
         
         # add info to .db file
         cursor = self.connect()
         
-        unique = True
+        unique = True # boolean indicator that entry is new to database
         
         try:
             # add entries to database
@@ -452,10 +484,10 @@ class CoaDatabase:
             cursor.execute("INSERT INTO flights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", flight)
             
             # create folder and copy files into archive
-            os.makedirs(backup_folder)
-            shutil.copy(log_file, backup_log)
-            if flight_file != "":
-                shutil.copy(flight_file, backup_flight)
+            backup_folder.mkdir(parents=True)
+            log_file.copy(backup_log)
+            if flight_file != Path("") and flight_file.is_file():
+                flight_file.copy(backup_flight)
             coa.write_newlog(data, new_log)
             
             self.commit()
@@ -511,13 +543,12 @@ class CoaDatabase:
                 return
             
         # delete old log file
-        if os.path.exists(os.path.join(self.db_path, item[8])):
-            os.remove(os.path.join(self.db_path, item[8]))
+        (self.db_path / item[8]).unlink(missing_ok=True)
         
         # Get locations of flight files
-        old_folder = os.path.join(self.db_path, os.path.dirname(item[8]))
-        raw_log = os.path.join(self.db_path, item[9])
-        raw_flight = os.path.join(self.db_path, item[10])
+        old_folder = (self.db_path / item[8]).parent
+        raw_log = self.db_path / item[9]
+        raw_flight = self.db_path / item[10]
         
         if item[10] == "" or item[10] == None:
             takeoff = item[5]
@@ -539,8 +570,8 @@ class CoaDatabase:
         except:
             submission_date = None
         
-        detector_id = item[1]
-        splitup = detector_id.strip().split(" ")
+        detector = item[1]
+        splitup = detector.strip().split(" ")
         serial = splitup[-1]
         detector = "".join(splitup[:-1])
             
@@ -549,16 +580,15 @@ class CoaDatabase:
         data_id = coa.data_id(data)
         
         # update all file and folder names
-        new_log = os.path.join(self.db_path, data_id, f"Data {data_id}.log")
-        rel_path = os.path.join(data_id, f"Data {data_id}.log")
-        new_folder = os.path.join(self.db_path, data_id)
+        new_log = self.db_path / data_id / f"Data {data_id}.log"
+        rel_path = f"{data_id}/Data {data_id}.log"
+        new_folder = self.db_path / data_id
         
         if old_folder != new_folder:
-            os.rename(old_folder, new_folder)
+            old_folder.rename(new_folder)
         
-        
-        raw_log = os.path.join(data_id, "backup", os.path.basename(raw_log))
-        raw_flight = os.path.join(data_id, "backup", os.path.basename(raw_flight))
+        raw_log = f"{data_id}/backup/{raw_log.name}"
+        raw_flight = f"{data_id}/backup/{raw_flight.name}"
         if item[10] == "":
             raw_flight = ""
         
@@ -639,13 +669,11 @@ class CoaDatabase:
                 return
         
         try:
-            folder = os.path.dirname(os.path.join(self.db_path, item[8]))
+            folder = (self.db_path / item[8]).parent
             
-            # ensure that cloud storage drives don't interfere and mark folders as read only
-            os.chmod(folder, stat.S_IWRITE)
-            os.chmod(os.path.join(folder, "backup"), stat.S_IWRITE)
-
-            shutil.rmtree(folder)
+            # function to delete tree of folder (incase there are other files/folders in the folder)
+            if folder.is_dir(): _rmtree(folder)
+            
             cursor.execute("DELETE FROM flights WHERE data_id = ?", (item[0],))
             
             self.commit()
@@ -685,6 +713,7 @@ class CoaDatabase:
             or if same_figure=True, a plotly figure object.
 
         """
+        figure_dest = Path(figure_dest)
         items = self.search(keywords, exact)
         
         if not items:
@@ -700,7 +729,7 @@ class CoaDatabase:
         for item in items:
             print(item[0].strip())
             
-            file = os.path.join(self.db_path, item[8])
+            file = self.db_path / item[8]
             data.append(coa.read_processed_log(file))
             
             if i > max_plot and not same_figure and not show_all:
@@ -719,13 +748,12 @@ class CoaDatabase:
             if self.show:
                 figs.show()
             
-            if os.path.isdir(figure_dest):
+            if figure_dest != Path("") and figure_dest.is_dir():
                 filename = ("combined_fig_" + 
                             data[0]['flight_number'] + "_" + 
                             data[0]['date'].strftime("%Y-%m-%d") + ".html")
                 print(f"Figure saved as '{filename}'")
-                name = os.path.join(figure_dest, filename)
-                figs.write_html(name, include_plotlyjs=self.include_plotlyjs)
+                figs.write_html(figure_dest / filename, include_plotlyjs=self.include_plotlyjs)
         
         else:
             for datum in data:
@@ -737,11 +765,10 @@ class CoaDatabase:
                     
                 data_name = coa.data_id(datum).replace(" ", "_")
                 
-                if os.path.isdir(figure_dest):
-                    filename = ("Figure_" + 
-                                data_name + ".html")
-                    name = os.path.join(figure_dest, filename)
-                    fig.write_html(name, include_plotlyjs=self.include_plotlyjs)
+                if figure_dest != Path("") and figure_dest.is_dir():
+                    filename = f"Figure_{data_name}.html"
+                    print(f"Figure saved as '{filename}'")
+                    fig.write_html(figure_dest / filename, include_plotlyjs=self.include_plotlyjs)
         
         return figs
         
@@ -767,12 +794,11 @@ class CoaDatabase:
             print("Nothing found")
             return
             
-        destination_path = os.path.join(destination_path, "export") 
+        destination_path = Path(destination_path) / "export"
         
         # intentionally only allow for one level of folder creation to minimize damage from error
         # due to incorrect input path
-        if not os.path.isdir(destination_path):
-            os.mkdir(destination_path)
+        destination_path.mkdir(exist_ok=True, parents=False)
             
         db = CoaDatabase(destination_path, show_figures=False, new_db=True)
         
@@ -780,8 +806,10 @@ class CoaDatabase:
         
         for item in items:
             print(item[0].strip())
+            # create desti_folder early since error handling requires its existance
+            dest_folder = Path("")
             
-            file = os.path.join(self.db_path, item[8])
+            file = self.db_path / item[8]
             data = coa.read_processed_log(file)
             
             fig = coa.plotly_plot(data)
@@ -791,37 +819,35 @@ class CoaDatabase:
             
             # create destination path names
             data_id = coa.data_id(data)
-            dest_folder = os.path.join(destination_path, data_id)
+            dest_folder = destination_path / data_id
             
-            backup = os.path.join(self.db_path, os.path.dirname(item[9]))
+            backup_log = self.db_path / item[9]
+            backup_flight = self.db_path / item[10]
             
-            data_file = os.path.join(dest_folder, f"Data {data_id}.log")
-            fig_file =  os.path.join(dest_folder, f"Figure {data_id}.html")
-            backup_dest = os.path.join(dest_folder, "backup")
+            data_file = dest_folder / f"Data {data_id}.log"
+            fig_file =  dest_folder / f"Figure {data_id}.html"
+            new_backup_log = dest_folder / "backup" / backup_log.name
+            new_backup_flight = dest_folder / "backup" / backup_flight.name
             
             # if there is an existing export by the same name in the folder, delete it
-            if os.path.isdir(dest_folder):
-                os.chmod(dest_folder, stat.S_IWRITE)
-                if os.path.isdir(os.path.join(dest_folder, "backup")):
-                    os.chmod(os.path.join(dest_folder, "backup"), stat.S_IWRITE)
-                shutil.rmtree(dest_folder)
+            if dest_folder.is_dir(): _rmtree(dest_folder) #ensure to delete all subfolders
             
-            os.mkdir(dest_folder)
+            dest_folder.mkdir()
             
             # finally export data
             coa.write_newlog(data, data_file)
             if include_html:
                 fig.write_html(fig_file, include_plotlyjs=self.include_plotlyjs)
             
-            shutil.copytree(backup, backup_dest)
+            # copy backup data
+            new_backup_log.parent.mkdir() # make /backup folder
+            backup_log.copy(new_backup_log)
+            backup_flight.copy(new_backup_flight)
             
             try:
                 # add updated entry to database
                 flight = item [0:13]
-                airports = [
-                    item[13:18],
-                    item[18:]
-                ]
+                airports = [item[13:18], item[18:]]
                 
                 cursor.executemany("INSERT OR IGNORE INTO airports VALUES (?, ?, ?, ?, ?)", airports)
                          
@@ -834,6 +860,7 @@ class CoaDatabase:
             except Exception:
                 db.rollback()   # Undo all changes since the transaction began
                 db.close()
+                if dest_folder != Path("") and dest_folder.is_dir(): _rmtree(dest_folder)
                 raise
         db.close()
 
@@ -871,42 +898,42 @@ class CoaDatabase:
         
         for item in items:            
             print(item[0].strip())
+            # create desti_folder early since error handling requires its existance
+            dest_folder = Path("")
             
-            file = os.path.join(db.db_path, item[8])
+            file = db.db_path / item[8]
             data = coa.read_processed_log(file)
-                        
-            if self.show:
-                fig = coa.plotly_plot(data)
-                fig.show()
             
             # create destination path names
             data_id = coa.data_id(data)
             
-            dest_folder = os.path.join(self.db_path, data_id)
-            dest_backup = os.path.join(dest_folder, "backup")
+            dest_folder = self.db_path / data_id
+            dest_backup = dest_folder / "backup"
             
-            backup_log = os.path.join(db.db_path, item[9])
-            backup_flight = os.path.join(db.db_path, item[10])
+            backup_log = db.db_path / item[9]
+            backup_flight = db.db_path / item[10]
             
-            new_backup_log = os.path.join(dest_backup, os.path.basename(item[9]))
-            new_backup_flight = os.path.join(dest_backup, os.path.basename(item[10]))
+            new_backup_log = dest_backup / backup_log.name
+            new_backup_flight = dest_backup / backup_flight.name
             
-            data_file = os.path.join(dest_folder, f"Data {data_id}.log")
+            data_file = dest_folder / f"Data {data_id}.log"
             
-            rel_path = os.path.join(data_id, f"Data {data_id}.log")
-            raw_log = os.path.join(data_id, "backup", os.path.basename(item[9]))
-            raw_flight = os.path.join(data_id, "backup", os.path.basename(item[10]))
-                        
-            os.mkdir(dest_folder)
-            os.mkdir(dest_backup)
-            
-            # finally import data
-            coa.write_newlog(data, data_file)
-            shutil.copy(backup_log, new_backup_log)
-            shutil.copy(backup_flight, new_backup_flight)
+            rel_path = f"{data_id}/Data {data_id}.log"
+            raw_log = f"{data_id}/backup/{backup_log.name}"
+            raw_flight = f"{data_id}/backup/{backup_flight.name}"
             
             dept = airports.get(data['origin ICAO'])
             dest = airports.get(data['destination ICAO'])
+            
+            # create flight folder
+            if dest_folder.is_dir(): _rmtree(dest_folder)
+            dest_folder.mkdir()
+            dest_backup.mkdir()
+                
+            # finally import data
+            coa.write_newlog(data, data_file)
+            backup_log.copy(new_backup_log)
+            backup_flight.copy(new_backup_flight)
             
             try:
                 # add updated entry to database
@@ -940,9 +967,14 @@ class CoaDatabase:
                 
             except Exception:
                 self.rollback()   # Undo all changes since the transaction began
+                if dest_folder != Path("") and dest_folder.is_dir(): _rmtree(dest_folder)
                 raise
             finally:
                 self.close()
+            
+            if self.show:
+                fig = coa.plotly_plot(data)
+                fig.show()
         
         # Finally, reprocess the data if needed.
         if reprocess:
@@ -962,13 +994,14 @@ class CoaDatabase:
 
 if __name__ == "__main__":
     # Find the location of the database; first check the current working directry
-    database_file = os.path.join(BASE_DIR, "data_archive", "coa.db")
+    database_file = BASE_DIR / "data_archive" / "coa.db"
     while True:
-        if os.path.isfile(database_file):
+        if database_file.is_file():
             print("Found database at", database_file)
-            database_path = os.path.dirname(database_file)
             break
-        database_file = input("What is the absolute path to the database .db file?\n")
+        database_file = Path(input("What is the absolute path to the database .db file?\n"))
+    
+    database_path = database_file.parent
         
     db = CoaDatabase(database_path, show_figures=True, show_progress=True)
         
@@ -1011,11 +1044,8 @@ if __name__ == "__main__":
             print(f"{len(ids)} entries in archive.")
             
         if number == 2:
-            figure_dest = input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\"")
-            
-            if not os.path.isdir(figure_dest):
-                figure_dest = ""
-            
+            figure_dest = Path(input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\""))
+
             db.plot_all_data(figure_dest=figure_dest)
         
         # Perform a search to plot figures or export
@@ -1033,18 +1063,15 @@ if __name__ == "__main__":
             
             # plot figures
             if number == 3 or number == 4:
-                figure_dest = input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\"")
-                
-                if not os.path.isdir(figure_dest):
-                    figure_dest = ""
+                figure_dest = Path(input("Save figure to folder: (If left blank, figure won't be saved):\n").strip("'\""))
                 
                 db.find_and_plot(keywords, same_figure=(number==4), figure_dest=figure_dest)
             
             # export
             if number == 5:
                 while True:
-                    dest_path = input("What folder would you like to copy the data to?\n")
-                    if not os.path.isdir(dest_path):
+                    dest_path = Path(input("What folder would you like to copy the data to?\n"))
+                    if not dest_path.is_dir():
                         print("Please provide an existing folder")
                         continue
                     break
@@ -1054,10 +1081,10 @@ if __name__ == "__main__":
         # export
         if number == 6:
             while True:
-                import_path = input("What is the path to the database to import files from?\n")
+                import_path = Path(input("What is the path to the database to import files from?\n"))
                 reprocess = input("Do you want to reprocess the data after importing? Y/n\n")
                 reprocess = (reprocess=="Y")
-                if not os.path.isdir(import_path):
+                if not import_path.is_dir():
                     print("Please provide an existing folder")
                     continue
                 break
@@ -1066,20 +1093,35 @@ if __name__ == "__main__":
                 
         # add a measurement to the database  
         if number == 7:
-            file = input("Enter a log file absolute path.\n")
-            flight = input("Enter a flight file absolute path, or leave blank.\n")
+            file = Path(input("Enter a log file absolute path.\n"))
+            flight = Path(input("Enter a flight file absolute path, or leave blank.\n"))
+            detector = input("What is the detector name? or leave blank.\n")
+            detector_serial = input("What is the detector serial number? If unknown, leave blank\n")
             citizen_id = input("Enter the data collector's citizen id, or leave it blank.\n")
+            submission_date = input("What is the submission date? YYYY-MM-DDTHH:mm:ssZ or leave blank.\n")
+            
+            if detector == "":
+                detector_serial = "UNKNOWN"
+            
+            if detector_serial == "":
+                detector_serial = "UNKNOWN"
             
             if citizen_id == "":
                 citizen_id = "UNKNOWN"
             
+            try:
+                submission_date = datetime.strptime(submission_date, "%Y-%m-%dT%H:%M:%SZ")
+            except:
+                print("Using current UTC time for submission date.")
+                submission_date = datetime.now(UTC)
+            
             flight_valid = False
-            if os.path.isfile(flight) or flight=="":
+            if flight == Path("") or flight.is_file():
                 flight_valid = True
             
-            if os.path.isfile(file) and flight_valid:
-                db.add(file, flight, citizen_id=citizen_id)
-            if not os.path.isfile(file):
+            if file.is_file() and flight_valid:
+                db.add(file, flight, detector=detector, detector_serial=detector_serial, citizen_id=citizen_id, submission_date=submission_date"C:\Users\aidan\OneDrive - University of Cape Town\Cosmic On Air\FlightData-20260619T160959Z-3-001\FlightData\SAA302 2026-05-22 Radiacode_103\backup\CPT JHB SA302 22 May 2026 Radiacode - Aidan Gebbie.csv")
+            if not file.is_file():
                 print("Data file path invalid.")
             if not flight_valid:
                 print("Flight file path invalid.")
