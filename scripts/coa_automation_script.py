@@ -78,7 +78,7 @@ max_delay = 7
 coa_db_id = "1BZdB4rI0tTv-XQso3f_l-g8tKOecjjFe"
 db_folder_id = "1SzYj5EtJFghee3Tt2Ct7MX6N0Roc31bs"
 form_sheet_id = "1CxkzhD3_av7tC_aTwajOspJ4aKAq3HuClFsxBYx6MiQ"
-submission_range = "Form responses 1!A2:L"
+submission_range = "'Form responses'!A2:L"
 processed_idx="L"
 # cell updating is done with f"Form responses 1!I{idx+2}"
 summary_sheet_id = "1IMXxyc_c7Bys8t5n10XhM1ewyuzAL2FIAwgeX5zjvA0"
