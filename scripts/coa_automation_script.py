@@ -879,7 +879,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
             # wrap process in try block to handle logging
             try:
                 # update file cell to 'n' to indicate currently processing
-                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "n")
+                update_cell(creds, form_sheet_id, f"'Form responses'!{processed_idx}{idx+2}", "n")
                                 
                 print(f"\nProcessing response: {row[1]} ({row[0]})")
                 
@@ -910,7 +910,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 
                 # create image and html of plotly figure
                 fig.write_html(html_path, include_plotlyjs="cdn") # use 'cdn' to minimize html file size
-                # don't forget. it requires you to install kaleido and pio.get_chrome()C:/Users/aidan/OneDrive - University of Cape Town/Cosmic On Air/Processed_data_12251023.log
+                # don't forget. it requires you to install kaleido and pio.get_chrome()
                 fig.write_image(img_path, width=1300, height=600)
                                 
                 msg = result_email(sender_email, row, img_path, html_path)
@@ -920,7 +920,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 # Note that the submission is labelled as processed before any other API interactions
                 # to avoid automatic reprocessing of submission incase of an error 
                 # (if an error occured it should definitely be processed manuaully/supervised)
-                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "y")
+                update_cell(creds, form_sheet_id, f"'Form responses'!{processed_idx}{idx+2}", "y")
                 
                 # email the citizen
                 if debug: # don't email in debug mode
@@ -955,7 +955,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 os.remove(img_path)
                 
                 # mark cell as completely processed
-                update_cell(creds, form_sheet_id, f"Form responses 1!{processed_idx}{idx+2}", "Y")
+                update_cell(creds, form_sheet_id, f"'Form responses'!{processed_idx}{idx+2}", "Y")
                 
                 print("Finished processing response.")
                 
