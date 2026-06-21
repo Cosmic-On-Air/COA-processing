@@ -892,7 +892,7 @@ with tempfile.TemporaryDirectory() as tmpdirname:
                 
                 detector_serial = row[4]
                 if detector_serial == "": detector_serial = "UNKNOWN"
-                flight, data, unique = db.add(data_file, flight_file, detector_id=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=row[0], raise_duplicate=False)
+                flight, data, unique = db.add(data_file, flight_file, detector=row[3], detector_serial=detector_serial, citizen_id=citizen_id, submission_date=row[0], raise_duplicate=False)
                 
                 if not unique:
                     print("Warning: data already in database.")
