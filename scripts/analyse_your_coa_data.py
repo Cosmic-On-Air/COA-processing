@@ -10,7 +10,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 28 Nov 2025
+Version: 7 Jul 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -24,16 +24,17 @@ What to edit (for users):
         quotation marks at the line data_file = r"" (line 44)
     2.  Copy the absolute path to your flight data file (e.g. .kml/.csv) and paste it between
         the quotation marks a the line flight_file = r"" (line 45)
+    3.  Replace the "UNKNOWN" detector with your detector (line 50)
     3.  Ensure that the CARI_7A_DVD folder is in the same folder as this code.
     4.  Run the code.
     5.  Wait for it to complete; a figure should launch in your default webbrowser summarising all
         your data.
-    6.  The figure .html and processed .log files should also appear in this folder.
+    6.  The figure .html and processed .log files should also appear in the folder of the data file.
         
     Feel free to try figure out some of the code!
 """
 
-import cosmic_on_air as ca
+import cosmic_on_air as coa
 import plotly.io as pio
 import os
 pio.renderers.default = 'browser'
@@ -46,23 +47,18 @@ flight_file = r""
 
 
 # Create data dictionary using files given
-data = ca.find_processed(data_file)
-#if data is None:
-#    data = ca.read_raw_log(data_file, flight_file, time_delta=5)
+data = coa.read_raw_log(data_file, flight_file, detector="UNKNOWN")
 
-plot_title = (f"{data['origin']} to {data['destination']}" +
-              f" - {data['date'].strftime('%d/%m/%Y')} - Detector {data['device_id']}")
-print(plot_title)
+data_id = coa.data_id(data)
+print(data_id)
 
-fig = ca.plotly_plot(data)
+fig = coa.plotly_plot(data)
 fig.show()
 
 #Creates the new .log file to store all the plotted and adjusted parameters
 file_path = os.path.dirname(data_file)
-file_name, ext = os.path.splitext(os.path.basename(data_file))
-file_name = "".join(char for char in file_name if char.isdecimal())
-new_file = os.path.join(file_path, f"Processed_data_{file_name}.log")
-fig_file = os.path.join(file_path, f"Figure_{file_name}.html")
+new_file = os.path.join(file_path, f"Data {data_id}.log")
+fig_file = os.path.join(file_path, f"Figure {data_id}.html")
 
-ca.write_newlog(data, new_file)
+coa.write_newlog(data, new_file)
 fig.write_html(fig_file)
