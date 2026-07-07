@@ -88,25 +88,22 @@ Standalone user-friendly script for processing individual detector files:
 ## Installation & Setup
 
 ### Prerequisites
-- Python 3.13.5 (or compatible version)
+- Python 3.14.6 (or compatible version)
 - CARI-7A software (free download: https://www.faa.gov/data_research/research/med_humanfacs/aeromedical/radiobiology/cari7)
 
 ### Python Dependencies
 ```
-airportsdata==20250909
-cartopy==0.25.0
-google-api-python-client==2.187.0
-google-auth-oauthlib==1.2.3
+airportsdata==20260315
+google_api_python_client==2.197.0
+google_auth_oauthlib==1.4.0
 iso3166==2.1.1
-matplotlib==3.10.8
-numpy==2.4.2
-plotly==6.5.0
-protobuf==7.34.0
+matplotlib==3.11.0
+numpy==2.5.1
+plotly==6.8.0
+protobuf==7.35.1
 pykml==0.2.0
-pyopensky==2.16
-requests==2.32.5
-scipy==1.17.1
-kaleido==1.2.0
+scipy==1.18.0
+kaleido==1.3.0
 ```
 
 ### Installation Steps
@@ -119,7 +116,7 @@ kaleido==1.2.0
 2. Download CARI-7A software and extract to the scripts folder:
    ```
    scripts/CARI_7A_DVD/cari7a_4.2.0(intel_linux)  # Linux/macOS
-   scripts/cari7a420.exe                           # Windows
+   scripts/CARI_7A_DVD/cari7a420.exe              # Windows
    ```
 
 3. For automation features, obtain OAuth2 credentials from Google Cloud Console
@@ -146,12 +143,15 @@ kaleido==1.2.0
 ### Processed Log Format
 Output files follow a standardized header with metadata and columnar data:
 ```
-# format = processedCOA-v1
+# format = processed_coa_v1
 # data delimiter = comma
-# device_id = Safecast 1225
-# detector_model = ???
-# reference_scaling_beta = 2.3106e-03
-# reference_alignment_method = time_offset_max_r2
+#
+# detector_name = Safecast
+# detector_serial_number = 1225
+# detector_native_quantity = cnt_5s
+# cnt_1min_source = original
+# cnt_5s_source = original
+# processing_pipeline = fit_data_to_cari_without_weather
 ...
 ```
 
@@ -164,7 +164,7 @@ See [database/README.md](database/README.md) for complete format specification.
 The project includes GitHub Actions workflow (`.github/workflows/main.yml`) that:
 - Runs every 6 hours (at least once daily)
 - Can be manually triggered
-- Sets up Python 3.13.5
+- Sets up Python 3.14.6
 - Installs dependencies including CARI-7A
 - Extracts and configures CARI software
 - Loads Google API credentials from secrets
@@ -177,27 +177,40 @@ The project includes GitHub Actions workflow (`.github/workflows/main.yml`) that
 import cosmic_on_air as coa
 
 # Load detector and flight data
-data = coa.find_processed("detector_file.log")
-flight = coa.read_flight_kml("FlightAware_AFR81_KSFO_LFPG_20250627.kml")
+data_file = "safecast_detector_file.log"
+flight_file = "FlightAware_AFR81_KSFO_LFPG_20250627.kml"
 
-# Generate visualization
-fig = coa.plot_summary(data, flight)
+data = coa.read_raw_log(data_file, flight_file, detector="safecast")
+
+# Generate plotly visualization
+fig = coa.plotly_plot(data)
+fig.show()
+
+# save data
+filename = f"Data {coa.data_id(data)}.log"
+coa.write_newlog(data, filename)
 ```
 
 ### Database Interactions
 ```python
 import cosmic_on_air_db as ca_db
+import os
 
-db = ca_db.CoaDatabase("data_archive")
-db.connect()
-entries = db.get_entries()
-db.add_entry(...)
-db.close()
+# create database object to link to database folder
+database_path = os.path.join(os.getcwd(), "data_archive")
+db = coa_db.CoaDatabase(database_path)
+
+# list and plot all entries in database
+ids = db.get_ids()
+for x in ids:
+   print(x)
+
+print(f"{len(ids)} entries in archive.")
 ```
 
 ### Calibration Analysis
 ```python
-# Find calibration factors across database
+# Find average calibration factors of different devices across database
 python scripts/misc\ scripts/find_calibration_factor.py
 ```
 
@@ -205,6 +218,7 @@ python scripts/misc\ scripts/find_calibration_factor.py
 
 - **CARI-7A Path**: When using cosmic_on_air functions, ensure CARI_7A_DVD folder is in the current working directory
 - **Database Path**: When using cosmic_on_air_db directly, the script looks for `cwd/data archive/coa.db`. If not found, it will prompt for the absolute path
+- **Database object**: When creating a database object, there is no need to call the `connect`, `close`, `commit` or `rollback` functions, all function calls automatically connect then disconnect from the database file to minimize file permission errors.
 - **Backups**: Regular manual backups of the database are recommended to prevent data loss
 - **Google Credentials**: Store OAuth2 tokens securely; do not commit to repository
 
@@ -218,7 +232,7 @@ python scripts/misc\ scripts/find_calibration_factor.py
 
 - **Website**: cosmic-on-air.org
 - **Email**: cosmiconair@gmail.com
-- **Latest Update**: June 2026
+- **Latest Update**: July 2026
 - **License**: See LICENSE file in repository
 
 ## Related Projects
