@@ -16,7 +16,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 07 Jul 2026
+Version: 14 Jul 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -298,12 +298,12 @@ def read_raw_log(log_filename,
         else:
             raise ValueError("Only data .log or .csv files are accepted")
 
-    fixed_times = fix_times(detector_data['time'], time_delta)
+    fixed_times, errors = fix_times(detector_data['time'], time_delta)
 
-    if fixed_times is detector_data['time']:
+    if errors == 0:
         data['timestamps'] = "original"
     else:
-        data['timestamps'] = "repaired"
+        data['timestamps'] = f"repaired_{errors}_errors"
         detector_data['time'] = fixed_times
 
     for key in ['detector_native_quantity', 'cnt_1min_source', 'cnt_5s_source']:
@@ -1168,20 +1168,21 @@ def fix_times(data_time, delta=-1, max_dt=1800):
     Returns
     -------
     data_time : a new array of datetime objects with attempted corrections to timestamps.
+    
+    number_of_errors : interger, number of errors in the original data
     """
     times = np.array(time2float(data_time), np.int64)
 
     dt = times[1:] - times[:-1]
 
 
-    valid_dt = (0<=dt) & (dt<=max_dt) # dt must be under max_dt, and greater or equal to zero
+    valid_dt = (0<dt) & (dt<=max_dt) # dt must be less than max_dt, and greater than zero
 
     if np.all(valid_dt): # return same object if times are correct
-        return data_time
+        return data_time, 0
 
     # determine delta if not known
     if delta <= 0:
-
         # data completely corrupt, don't try fixing it
         if not np.any(valid_dt):
             raise Exception("Unable to repair without specific dt; time too corrupt.")
@@ -1189,20 +1190,16 @@ def fix_times(data_time, delta=-1, max_dt=1800):
         delta = np.median(dt[valid_dt])
 
     def valid(dt):
-        if dt <= 0: return False
-        if dt > max_dt: return False
-        return True
+        return (0<dt) & (dt<=max_dt)
 
-    def increment_binary(array, i = 0):
-        if not array[-i]:
-            array[-i] = True
-            return
-        else:
-            array[-i] = False
-            if i + 1 < len(array):
-                increment_binary(array, i+1)
+    def increment_binary(array):
+        i=-1
+        while array[i]:
+            array[i] = False
+            i -= 1
+        array[i] = True
 
-    errors = []
+    errors = np.array([])
     for i in range(dt.size):
         if dt[i] == 0:
             dt[i] = delta
@@ -1210,45 +1207,38 @@ def fix_times(data_time, delta=-1, max_dt=1800):
             if i>1 and not valid_dt[i-1]:
                 errors[-1] -= delta
             else:
-                errors.append(-delta)
+                errors = np.append(errors, -delta)
 
             continue
 
         if not valid_dt[i]:
             fixed = False
 
-            if errors:
+            if errors.size: #if errors
+                if errors.size > 20: # avoid exponential blow up
+                    raise Exception("Cannot fix detector timestamps, too many errors.")
                 # try find a combination of previous errors that cancel current error
-                arr = [False] * len(errors)
-                arr[0] = True
-                for j in range(2**len(errors) - 1):
-                    if sum(arr) <= 10: # don't try combine more than 10 errors (exponential)
-                        error = 0
+                mask = np.full(errors.size, False)
+                
+                for j in range(1, 2**errors.size):
+                    increment_binary(mask)
+                    
+                    error = errors.sum(where=mask)
 
-                        for k in range(len(errors)):
-                            if arr[k]:
-                                error += errors[k]
-
-                        if valid(dt[i] + error):
-                            dt[i] += error
-
-                            for k in range(len(errors)-1, -1, -1):
-                                if arr[k]:
-                                    del errors[k]
-
-                            fixed = True
-                            break
-
-                    increment_binary(arr)
+                    if valid(dt[i] + error):
+                        dt[i] += error
+                        errors = np.delete(errors, mask)
+                        fixed = True
+                        break
 
             if not fixed: # if no errors matched, add to list of errors and overwrite it
-                errors.append(dt[i] - delta)
+                errors = np.append(errors, dt[i] - delta)
                 dt[i] = delta
 
     times = np.concatenate([[0], np.cumsum(dt)])
 
     # finally return the correct times, rounded to the nearest second
-    return np.array([data_time[0] + timedelta(seconds=int(t)) for t in times])
+    return np.array([data_time[0] + timedelta(seconds=int(t)) for t in times]), (~valid_dt).sum()
 
 ####################################################################################################
 def estimate_takeoff(data, flight_duration, max_diff=100):
@@ -1393,8 +1383,6 @@ def align_time(detector_data, flight_data, cari_data):
         measurement_times = times_from_start[window_start:window_end+1] - (detector_data['time'][window_start] - detector_data['time'][0]).total_seconds()
 
         reference_adjusted = np.interp(measurement_times, reference_times, reference)
-
-
 
         window_start += 1
 
