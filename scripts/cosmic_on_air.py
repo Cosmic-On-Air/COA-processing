@@ -16,7 +16,7 @@ Description:
 
 Cosmic On Air (cosmic-on-air.org; cosmiconair@gmail.com)
 
-Version: 14 Jul 2026
+Version: 11 Oct 2026
 
 Contributors:
 C. Briand, Laboratory for Space Studies and Instrumentation in Astrophysics, Observatoire de Paris, France
@@ -73,9 +73,12 @@ def data_id(data):
     Returns
     id : string defined as per description
     """
-    serial = " " + data['detector_serial']
-    if serial == " UNKNOWN":
+    #strip serial of non alphanumeric characters since it must be used in a file name
+    serial = ''.join(ch for ch in data['detector_serial'] if ch.isalnum())
+    if serial == "UNKNOWN":
         serial = ""
+    else:
+        serial = " " + serial
 
     return data['flight_number'] + " " + data['date'].strftime("%Y-%m-%d") + " " + data['detector'] + serial
 
