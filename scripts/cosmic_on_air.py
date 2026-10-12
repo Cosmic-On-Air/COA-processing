@@ -660,6 +660,7 @@ def read_otherdata_csv(data_filename, detector=""):
             data['detector_native_quantity'] = 'average_cps_over_1_minute'
 
             for line in f:
+                num_lines += 1
                 try:
                     row = line.split(';')
 
@@ -714,6 +715,7 @@ def read_otherdata_csv(data_filename, detector=""):
             data['detector_native_quantity'] = 'average_cps_over_1_minute'
 
             for line in f:
+                num_lines += 1
                 try:
                     row = line.split(',')
 
