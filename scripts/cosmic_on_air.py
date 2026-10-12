@@ -608,6 +608,7 @@ def read_otherdata_csv(data_filename, detector=""):
             'time' : [], 'lat' : [], 'lon' : [], 'alt' : []}
 
     data['detector'] = "UNKNOWN"
+    num_lines = 0
 
     with open(data_filename, "r", encoding="utf-8", errors="replace") as f:
         line1 = f.readline()
@@ -621,6 +622,7 @@ def read_otherdata_csv(data_filename, detector=""):
             data['detector_native_quantity'] = 'cnt_1mn'
 
             for line in f:
+                num_lines += 1
                 try:
                     row = line.split(',')
                     temp_time = None
@@ -687,9 +689,15 @@ def read_otherdata_csv(data_filename, detector=""):
                         data['cnt_1mn'].append(int(float(temp_cnt)*60))
                         data['cnt_5sc'].append(int(float(temp_cnt)*5))
                     else:
-                        # in alt format, temp_cnt is average per minute
-                        data['cnt_1mn'].append(int(temp_cnt))
-                        data['cnt_5sc'].append(int(float(temp_cnt)/20))
+                        if "cps" in temp_cnt: # one format has 'cps' in cell
+                            temp_cnt = float(temp_cnt.split()[0])
+                            data['cnt_1mn'].append(int(temp_cnt*60))
+                            data['cnt_5sc'].append(int(temp_cnt*5))
+                        else:
+                            # in alt format, temp_cnt is cpm
+                            temp_cnt = float(temp_cnt)
+                            data['cnt_1mn'].append(int(temp_cnt))
+                            data['cnt_5sc'].append(int(temp_cnt/20))
 
                     data['lat'].append(np.nan)
                     data['lon'].append(np.nan)
@@ -739,8 +747,9 @@ def read_otherdata_csv(data_filename, detector=""):
 
     #Turn data lists into numpy arrays now that they are at their final size
     list2arr(data)
-
-    if len(data['time']) <= 1:
+    
+    # if less than 10% of the file was readable, raise an error
+    if len(data['time']) <= 1 or len(data['time']) / num_lines < 0.1:
         raise Exception("Could not interpret data format of provided .csv file")
 
     return data
